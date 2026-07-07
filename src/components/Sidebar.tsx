@@ -62,7 +62,7 @@ function Node({ node, depth }: { node: TreeNode; depth: number }) {
         style={{ paddingLeft: 8 + depth * 14 }}
         onClick={onClick}
       >
-        <span className="tree-icon">{node.type === 'folder' ? (isChat ? '💬' : open ? '▾' : '▸') : '·'}</span>
+        <span className="tree-icon">{node.type === 'folder' ? (isChat ? '◇' : open ? '▾' : '▸') : '·'}</span>
         <span className="tree-name">{node.name.replace(/\.md$/, '')}</span>
         <span className="tree-actions" onClick={(e) => e.stopPropagation()}>
           {node.type === 'folder' && !isChat && (
@@ -154,9 +154,9 @@ export function Sidebar() {
         <div className="presence-title">Devices</div>
         {presence.map((d) => (
           <div key={d.deviceId} className="presence-row">
-            <span>{d.deviceType === 'phone' ? '📱' : '💻'}</span>
+            <span className={`presence-state ${d.state}`}>●</span>
             <span className="mono">{d.deviceId}</span>
-            <span className={`presence-state ${d.state}`}>{d.state}</span>
+            <span className="presence-state">{d.state === 'active' ? d.deviceType : 'away'}</span>
           </div>
         ))}
         {presence.length === 0 && <div className="presence-row dim">no devices</div>}

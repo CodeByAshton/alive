@@ -7,8 +7,8 @@ import { useVault } from '../lib/store';
 import { buildGraph } from '../lib/wikilinks';
 
 const COLORS: Record<string, string> = {
-  note: '#9ba3af',
-  chat: '#7aa2f7',
+  note: '#8f959e',
+  chat: '#6d9ee8',
   skill: '#b8a06a',
 };
 

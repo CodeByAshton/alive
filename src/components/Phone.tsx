@@ -58,8 +58,8 @@ export function Phone() {
       <div className="phone-header">
         <span className="app-title">Vault</span>
         <span className={`conn-dot ${connected ? 'on' : 'off'}`} />
-        <button className={`voice-toggle ${speak ? 'on' : ''}`} onClick={() => setSpeak(!speak)} title="Speak replies">
-          🔈
+        <button className={`voice-toggle mono ${speak ? 'on' : ''}`} onClick={() => setSpeak(!speak)} title="Speak replies aloud">
+          voice {speak ? 'on' : 'off'}
         </button>
       </div>
       <Chat compact />
@@ -71,7 +71,7 @@ export function Phone() {
           disabled={!voice.available || !activeChat}
           title={voice.available ? 'Hold a thought, tap to speak' : 'Speech recognition unavailable in this browser'}
         >
-          {listening ? '● listening' : '🎙 speak'}
+          {listening ? '● listening — tap to stop' : 'speak'}
         </button>
       </div>
     </div>
