@@ -7,6 +7,31 @@ export function seedVault(store) {
   const put = (path, content) => store.put({ path, type: 'file', content });
 
   put(
+    'AGENT.md',
+    `# AGENT.md
+
+Standing instructions for the assistant. This file is loaded into every turn — edit it to shape how the assistant behaves in this vault (like a CLAUDE.md).
+
+- Prefer short, direct answers.
+- New notes go under notes/ unless told otherwise; journals under journal/.
+- When you change the vault, mention what changed in one line.
+- Personal context lives in [[context]] — check it before making assumptions.
+`
+  );
+
+  put(
+    'context/About Me.md',
+    `# About Me
+
+Fill this in — the assistant reads files you reference with [[wikilinks]] or @paths, and this folder is the conventional home for standing personal context.
+
+- Name:
+- What I'm working on:
+- Preferences:
+`
+  );
+
+  put(
     'Welcome.md',
     `# Welcome to Vault
 

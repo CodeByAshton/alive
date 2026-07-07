@@ -9,6 +9,7 @@ interface VaultState {
   providers: Provider[];
   activePath: string | null; // file open in the editor
   activeChat: string | null; // chat folder open in the chat pane
+  railTab: 'files' | 'chats' | 'skills' | 'devices';
   streams: Map<string, StreamState>;
 
   applyRecords: (records: VaultRecord[]) => void;
@@ -18,6 +19,7 @@ interface VaultState {
   setProviders: (providers: Provider[]) => void;
   setActivePath: (path: string | null) => void;
   setActiveChat: (path: string | null) => void;
+  setRailTab: (tab: 'files' | 'chats' | 'skills' | 'devices') => void;
   updateStream: (chatPath: string, fn: (s: StreamState) => StreamState) => void;
   clearStream: (chatPath: string) => void;
 }
@@ -32,6 +34,7 @@ export const useVault = create<VaultState>((set) => ({
   providers: [],
   activePath: null,
   activeChat: null,
+  railTab: 'files',
   streams: new Map(),
 
   applyRecords: (incoming) =>
@@ -54,6 +57,7 @@ export const useVault = create<VaultState>((set) => ({
   setProviders: (providers) => set({ providers }),
   setActivePath: (activePath) => set({ activePath }),
   setActiveChat: (activeChat) => set({ activeChat }),
+  setRailTab: (railTab) => set({ railTab }),
 
   updateStream: (chatPath, fn) =>
     set((state) => {

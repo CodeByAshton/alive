@@ -57,6 +57,30 @@ presence.on('update', (devices) => broadcast({ type: 'presence', devices }));
 const chatLocks = new Set();
 let connSeq = 0;
 
+// Remote tool execution: dispatch a tool call to a connected device that can
+// run it (the companion node harness), await its reply over the same socket.
+const conns = new Map(); // connId -> { ws, descriptor }
+const pendingExec = new Map(); // execId -> { resolve, reject, timer }
+let execSeq = 0;
+
+function execRemote(name, input) {
+  const target = [...conns.entries()].find(([connId, c]) => {
+    const live = presence.devices.get(connId);
+    return live?.state === 'active' && (c.descriptor.capabilities || []).includes('exec') && c.ws.readyState === c.ws.OPEN;
+  });
+  if (!target) return Promise.reject(new Error('No machine is connected to run commands right now.'));
+  const [, conn] = target;
+  return new Promise((resolve, reject) => {
+    const id = `exec-${++execSeq}`;
+    const timer = setTimeout(() => {
+      pendingExec.delete(id);
+      reject(new Error('Command timed out (no response from the machine).'));
+    }, 90_000);
+    pendingExec.set(id, { resolve, reject, timer });
+    conn.ws.send(JSON.stringify({ type: 'tool_exec', id, name, input }));
+  });
+}
+
 wss.on('connection', (ws, req) => {
   const params = new URL(req.url, 'http://x').searchParams;
   if (params.get('key') !== VAULT_KEY) {
@@ -71,6 +95,7 @@ wss.on('connection', (ws, req) => {
   };
 
   sockets.add(ws);
+  conns.set(connId, { ws, descriptor });
   presence.join(connId, descriptor);
   ws.send(JSON.stringify({ type: 'hello', presence: presence.snapshot(), rev: store.rev }));
 
@@ -98,6 +123,16 @@ wss.on('connection', (ws, req) => {
         case 'presence_state':
           presence.setState(connId, msg.state === 'background' ? 'background' : 'active');
           break;
+        case 'tool_exec_result': {
+          const pending = pendingExec.get(msg.id);
+          if (pending) {
+            pendingExec.delete(msg.id);
+            clearTimeout(pending.timer);
+            if (msg.ok) pending.resolve(String(msg.output ?? ''));
+            else pending.reject(new Error(String(msg.output || 'command failed')));
+          }
+          break;
+        }
         case 'turn': {
           if (chatLocks.has(msg.chatPath)) {
             ws.send(JSON.stringify({ type: 'turn_error', chatPath: msg.chatPath, error: 'A turn is already running in this chat.' }));
@@ -114,6 +149,7 @@ wss.on('connection', (ws, req) => {
               provider: msg.provider || 'anthropic',
               model: msg.model || 'claude-opus-4-8',
               broadcast,
+              execRemote,
             });
           } finally {
             chatLocks.delete(msg.chatPath);
@@ -128,6 +164,7 @@ wss.on('connection', (ws, req) => {
 
   ws.on('close', () => {
     sockets.delete(ws);
+    conns.delete(connId);
     presence.leave(connId);
   });
 });

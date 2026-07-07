@@ -97,9 +97,24 @@ function createMockEngine() {
 
       // Deterministic behaviors so tests can exercise the tool loop.
       const noteMatch = last.match(/create (?:a )?note (?:called |named )?["']?([\w./ -]+?)["']?(?: with content ["'](.+?)["'])?$/i);
+      const cmdMatch = last.match(/run (?:the )?command[: ]+(.+)$/i);
       const canWrite = tools.some((t) => t.name === 'create_note');
+      const canExec = tools.some((t) => t.name === 'run_command');
       let text = '';
-      if (noteMatch && canWrite) {
+      if (cmdMatch && canExec) {
+        onEvent({ type: 'tool_start', name: 'run_command', input: { command: cmdMatch[1] } });
+        toolsUsed.push('run_command');
+        try {
+          const output = await executeTool('run_command', { command: cmdMatch[1] });
+          onEvent({ type: 'tool_result', name: 'run_command', ok: true });
+          text = await say(`Ran it. Output:\n\n\`\`\`\n${String(output).slice(0, 500)}\n\`\`\``);
+        } catch (err) {
+          onEvent({ type: 'tool_result', name: 'run_command', ok: false });
+          text = await say(`The command failed: ${err.message}`);
+        }
+      } else if (cmdMatch && !canExec) {
+        text = await say(`Noted — I'll run \`${cmdMatch[1]}\` as soon as I'm able to; for now let's keep planning.`);
+      } else if (noteMatch && canWrite) {
         const name = noteMatch[1].trim().replace(/\.md$/, '');
         const path = name.includes('/') ? `${name}.md` : `notes/${name}.md`;
         onEvent({ type: 'tool_start', name: 'create_note', input: { path } });

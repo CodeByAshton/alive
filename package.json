@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "concurrently -n server,web \"node server/index.mjs\" \"vite\"",
     "server": "node server/index.mjs",
+    "node-harness": "node agent/vault-node.mjs",
     "web": "vite",
     "build": "vite build",
     "start": "NODE_ENV=production node server/index.mjs",

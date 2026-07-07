@@ -77,6 +77,20 @@ const VAULT_TOOLS = [
     input_schema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
     capability: 'write',
   },
+  {
+    name: 'run_command',
+    description:
+      "Run a shell command in the user's active workspace on their computer. Use it for coding tasks: git, builds, tests, inspecting files outside the vault, or invoking installed CLIs (e.g. claude, codex, npm, python). Returns stdout+stderr, truncated.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        command: { type: 'string' },
+        cwd: { type: 'string', description: 'Optional working directory relative to the workspace root.' },
+      },
+      required: ['command'],
+    },
+    capability: 'exec',
+  },
 ];
 
 function sanitizePath(p) {
@@ -103,9 +117,18 @@ export function assembleTools(presence) {
   return VAULT_TOOLS.filter((t) => capabilities.has(t.capability)).map(({ capability, ...t }) => t);
 }
 
-function makeToolExecutor(store) {
+function makeToolExecutor(store, execRemote) {
   return async function executeTool(name, input) {
     switch (name) {
+      case 'run_command': {
+        // Executed on a connected node (the companion harness on the user's
+        // computer), not on this server.
+        // TODO: trust boundary — arbitrary shell execution triggered by a
+        // (possibly voice-initiated) agent. A real version needs per-command
+        // scoping/approval, signed capability grants, and a kill switch.
+        if (!execRemote) throw new Error('No machine is available to run commands right now.');
+        return execRemote('run_command', input);
+      }
       case 'list_files': {
         const prefix = input.prefix ? sanitizePath(input.prefix) : '';
         const rows = store
@@ -189,6 +212,40 @@ function nextSeq(store, chatPath) {
   return String(count + 1).padStart(4, '0');
 }
 
+// Context wiring: [[wikilinks]] and @path mentions in the user's message pull
+// those vault files into the turn, so the assistant always has what the user
+// is pointing at.
+function resolveReference(store, name) {
+  const target = name.trim().toLowerCase().replace(/\.md$/, '');
+  const files = store.list().filter((r) => r.type === 'file');
+  for (const rec of files) {
+    if (rec.path.toLowerCase().replace(/\.md$/, '') === target) return rec;
+  }
+  for (const rec of files) {
+    const base = rec.path.split('/').pop().toLowerCase().replace(/\.md$/, '');
+    if (base === target) return rec;
+  }
+  return null;
+}
+
+function collectReferencedFiles(store, text) {
+  const names = new Set();
+  for (const m of text.matchAll(/\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]/g)) names.add(m[1]);
+  for (const m of text.matchAll(/@([\w./-]+(?:\.md)?)/g)) names.add(m[1]);
+  const seen = new Set();
+  const files = [];
+  for (const name of names) {
+    const rec = resolveReference(store, name);
+    if (!rec || seen.has(rec.path)) continue;
+    seen.add(rec.path);
+    files.push(rec);
+    if (files.length >= 5) break;
+  }
+  return files;
+}
+
+const AGENT_FILE = 'AGENT.md';
+
 function vaultOutline(store) {
   const paths = store
     .list()
@@ -199,7 +256,7 @@ function vaultOutline(store) {
   return paths.join('\n');
 }
 
-export async function runTurn({ store, presence, chatPath, text, deviceType, provider, model, broadcast }) {
+export async function runTurn({ store, presence, chatPath, text, deviceType, provider, model, broadcast, execRemote }) {
   chatPath = sanitizePath(chatPath);
   const timestamp = new Date().toISOString();
 
@@ -222,6 +279,23 @@ export async function runTurn({ store, presence, chatPath, text, deviceType, pro
   const messages = readConversation(store, chatPath);
 
   let system = SYSTEM_PROMPT + `\n\nCurrent vault contents (paths):\n${vaultOutline(store) || '(empty)'}`;
+
+  // Standing vault instructions — the CLAUDE.md of this vault. User-editable,
+  // loaded into every turn.
+  const agentFile = store.get(AGENT_FILE);
+  if (agentFile) {
+    system += `\n\nStanding instructions from ${AGENT_FILE} (set by the user; follow them):\n${agentFile.content.slice(0, 6000)}`;
+  }
+
+  // Files the user referenced in this message ride along as context.
+  const referenced = collectReferencedFiles(store, text);
+  if (referenced.length) {
+    system += `\n\nFiles the user referenced in their message:`;
+    for (const rec of referenced) {
+      system += `\n\n<file path="${rec.path}">\n${rec.content.slice(0, 8000)}\n</file>`;
+    }
+  }
+
   if (skill) {
     system += `\n\nThe user invoked the "${skill.name}" skill (${skill.trigger}). Follow these skill instructions for this turn:\n${skill.instructions}`;
   }
@@ -236,7 +310,7 @@ export async function runTurn({ store, presence, chatPath, text, deviceType, pro
       system,
       messages,
       tools,
-      executeTool: makeToolExecutor(store),
+      executeTool: makeToolExecutor(store, execRemote),
       onEvent: (event) => {
         if (event.type === 'text') broadcast({ type: 'turn_delta', chatPath, text: event.text });
         else if (event.type === 'tool_start') broadcast({ type: 'turn_tool', chatPath, name: event.name, status: 'running' });

@@ -47,18 +47,24 @@ export function Chat({ compact = false }: { compact?: boolean }) {
   return (
     <div className={`chat ${compact ? 'compact' : ''}`}>
       <div className="chat-header">
-        <select
-          className="chat-select"
-          value={activeChat ?? ''}
-          onChange={(e) => setActiveChat(e.target.value || null)}
-        >
-          {!activeChat && <option value="">No chat</option>}
-          {chats.map((c) => (
-            <option key={c.path} value={c.path}>
-              {c.title}
-            </option>
-          ))}
-        </select>
+        {compact ? (
+          <select
+            className="chat-select"
+            value={activeChat ?? ''}
+            onChange={(e) => setActiveChat(e.target.value || null)}
+          >
+            {!activeChat && <option value="">No chat</option>}
+            {chats.map((c) => (
+              <option key={c.path} value={c.path}>
+                {c.title}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span className="chat-title">
+            {chats.find((c) => c.path === activeChat)?.title ?? 'No chat selected'}
+          </span>
+        )}
         <button onClick={newChat}>+ New</button>
         {activeChat && <ModelPicker chatPath={activeChat} />}
       </div>
