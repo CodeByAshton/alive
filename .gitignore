@@ -3,3 +3,7 @@ dist/
 server/data/
 *.log
 .env
+release/
+ios/App/App/public/
+ios/App/output/
+ios/DerivedData/

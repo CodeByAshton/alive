@@ -28,6 +28,14 @@ seedVault(store);
 const presence = new PresenceRegistry();
 
 const app = express();
+// Native shells (the iOS app) call the API cross-origin. The vault key is the
+// gate; CORS just lets the request through. TODO: trust boundary.
+app.use('/api', (req, res, next) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Headers', 'content-type');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 app.get('/api/models', async (req, res) => {
   if (req.query.key !== VAULT_KEY) return res.status(401).json({ error: 'bad vault key' });

@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "main": "desktop/main.cjs",
+  "description": "An AI-native vault that follows you across devices.",
+  "author": "CodeByAshton",
   "scripts": {
     "dev": "concurrently -n server,web \"node server/index.mjs\" \"vite\"",
     "server": "node server/index.mjs",
@@ -10,10 +13,34 @@
     "web": "vite",
     "build": "vite build",
     "start": "NODE_ENV=production node server/index.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "desktop": "npm run build && electron .",
+    "dist:desktop": "npm run build && electron-builder",
+    "ios:sync": "npm run build && cap sync ios",
+    "e2e": "node scripts/e2e.mjs"
+  },
+  "build": {
+    "appId": "com.codebyashton.vault",
+    "productName": "Vault",
+    "directories": { "output": "release" },
+    "files": [
+      "desktop/**",
+      "dist/**",
+      "server/**",
+      "agent/**",
+      "shared/**",
+      "!server/data/**"
+    ],
+    "asarUnpack": ["server/**", "agent/**", "shared/**"],
+    "mac": { "category": "public.app-category.productivity", "target": ["dmg", "zip"] },
+    "win": { "target": ["nsis"] },
+    "linux": { "target": ["AppImage", "deb"], "category": "Utility" },
+    "publish": { "provider": "github" }
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
+    "@capacitor/core": "^8.4.1",
+    "@capacitor/ios": "^8.4.1",
     "@codemirror/lang-markdown": "^6.3.0",
     "@codemirror/language-data": "^6.5.0",
     "@codemirror/state": "^6.4.0",
@@ -30,11 +57,14 @@
     "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.4.1",
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
     "@types/ws": "^8.5.12",
     "@vitejs/plugin-react": "^4.3.1",
     "concurrently": "^9.0.0",
+    "electron": "^43.1.0",
+    "electron-builder": "^26.15.3",
     "playwright": "^1.61.1",
     "typescript": "^5.6.2",
     "vite": "^5.4.8"

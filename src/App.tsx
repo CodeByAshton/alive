@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { startSync, surface } from './lib/sync';
 import { useVault } from './lib/store';
+import { getServerConfig } from './lib/config';
 import { Sidebar } from './components/Sidebar';
 import { Editor } from './components/Editor';
 import { Chat } from './components/Chat';
 import { Graph } from './components/Graph';
 import { Phone } from './components/Phone';
+import { Connect } from './components/Connect';
 
 function useSize<T extends HTMLElement>() {
   const ref = useRef<T>(null);
@@ -58,11 +60,13 @@ function Desktop() {
 
 export default function App() {
   const hydrated = useVault((s) => s.hydrated);
+  const configured = getServerConfig() !== null;
 
   useEffect(() => {
-    startSync();
-  }, []);
+    if (configured) startSync();
+  }, [configured]);
 
+  if (!configured) return <Connect />;
   if (!hydrated) return <div className="boot">Opening vault…</div>;
   return surface === 'phone' ? <Phone /> : <Desktop />;
 }

@@ -7,6 +7,26 @@ An AI-native workspace: an Obsidian-style vault that lives in the cloud, syncs i
 1. **Cross-session / cross-device continuity.** The vault and every conversation persist in the cloud and sync live to every connected device, each of which keeps a fast local IndexedDB cache. Close the tab, switch from phone to laptop — everything is exactly as left. Chats are folders; each turn is a Markdown file with frontmatter (`role`, `timestamp`, `device`, `provider`, `model`, `tools_used`). Resuming a session is just re-reading those records — there is no separate session database that can drift from the vault.
 2. **Implicit device-awareness.** Each client registers with a cloud presence registry, advertising a device descriptor (type + capabilities). The assistant's tools are assembled **per-turn from which devices are currently present**: with only the phone connected the toolset is conversational (+ voice); the moment a desktop comes online, vault-editing tools exist; the moment a machine running the **node harness** comes online, it can run commands there. The model is never told which device is active and never announces it — capability simply changes because presence changed.
 
+## Installable apps
+
+**Desktop (macOS / Windows / Linux)** — an Electron app, Obsidian/Claude-Desktop style. Installing it is the whole story on a computer: it boots the vault server locally, opens the UI against it, and runs the node harness — the machine immediately becomes a fully capable device for every surface on the same vault (your phone connects to it over the LAN or a tunnel).
+
+```bash
+npm run desktop           # run the desktop app from source
+npm run dist:desktop      # build installers into release/ (dmg/zip, nsis, AppImage/deb)
+```
+
+Pushing a tag like `v0.1.0` triggers `.github/workflows/release.yml`, which builds installers on macOS/Windows/Linux runners and attaches them to a GitHub Release — the artifacts a download page links to. Set `VAULT_REMOTE=https://your-server` to run the desktop app against a hosted vault instead of its local one. (Code signing/notarization for macOS distribution still needs an Apple Developer identity wired into the workflow.)
+
+**iPhone (App Store / TestFlight)** — a Capacitor iOS app wrapping the same client lives in `ios/`. On first launch it shows a connect screen (server URL + vault key), then behaves exactly like the phone surface — same vault, same continuity, voice included. Building/submitting requires a Mac:
+
+```bash
+npm run ios:sync          # build web assets into the iOS project
+npx cap open ios          # open in Xcode → sign → run / archive → App Store Connect
+```
+
+The client auto-detects where it's running: same-origin in a browser or the desktop app (zero config), explicit server URL in the native shell (`?server=http://host:8787` works in any browser too, and the server sends CORS for it).
+
 ## The node harness (act on your computer)
 
 Talk to the agent on your phone over AirPods, open your laptop, and — if the harness is running there — the same conversation can now act on that machine:

@@ -660,6 +660,57 @@ select {
 }
 .interim { color: var(--text-3); font-size: 12px; }
 
+/* ── connect (first run on native shells) ─────────────────────────────── */
+.connect {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+.connect-card {
+  width: min(360px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 26px 24px;
+  background: var(--bg-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+}
+.connect-mark {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  border: 1px solid var(--hairline-strong);
+  font-weight: 700;
+  font-size: 16px;
+}
+.connect-card h1 { margin: 2px 0 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+.connect-card p { margin: 0 0 4px; color: var(--text-2); font-size: 12.5px; }
+.connect-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+.connect-card input { padding: 8px 10px; font-size: 14px; font-family: var(--mono); }
+.connect-error { color: var(--warn); font-size: 12px; }
+.connect-go {
+  margin-top: 4px;
+  padding: 9px;
+  border-radius: var(--r-md);
+  background: var(--accent-dim);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  color: var(--text-1);
+  font-weight: 500;
+}
+
 /* scrollbars — thin and quiet */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb {

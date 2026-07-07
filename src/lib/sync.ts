@@ -10,6 +10,7 @@ import { db, getLastRev, loadCachedRecords, setLastRev } from './db';
 import { useVault } from './store';
 import type { VaultRecord } from './types';
 import { getCapabilities, getDeviceId, getSurface, getVaultKey } from './device';
+import { getServerConfig } from './config';
 
 let ws: WebSocket | null = null;
 let started = false;
@@ -18,16 +19,17 @@ let backoff = 500;
 export const surface = getSurface();
 const deviceId = getDeviceId(surface);
 const vaultKey = getVaultKey();
+const server = getServerConfig();
 
 export async function startSync(): Promise<void> {
-  if (started) return;
+  if (started || !server) return;
   started = true;
 
   const cached = await loadCachedRecords();
   useVault.getState().applyRecords(cached.filter((r) => !r.deleted));
   useVault.getState().setHydrated();
 
-  fetch(`/api/models?key=${encodeURIComponent(vaultKey)}`)
+  fetch(`${server.httpBase}/api/models?key=${encodeURIComponent(vaultKey)}`)
     .then((r) => r.json())
     .then((json) => useVault.getState().setProviders(json.providers ?? []))
     .catch(() => {});
@@ -40,14 +42,14 @@ export async function startSync(): Promise<void> {
 }
 
 function connect() {
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  if (!server) return;
   const params = new URLSearchParams({
     key: vaultKey,
     deviceId,
     deviceType: surface,
     caps: getCapabilities(surface).join(','),
   });
-  ws = new WebSocket(`${proto}://${location.host}/ws?${params}`);
+  ws = new WebSocket(`${server.wsBase}/ws?${params}`);
 
   ws.onopen = async () => {
     backoff = 500;
