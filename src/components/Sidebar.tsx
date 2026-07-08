@@ -2,7 +2,7 @@
 // Devices), and the active section below. Notion/Linear-flavored — rows on a
 // soft gray canvas, hairlines, rounded corners.
 
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState, type ElementType } from 'react';
 import {
   ChevronRight,
   CirclePause,
@@ -27,6 +27,13 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -38,7 +45,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { cn } from '@/lib/utils';
 import { useVault } from '../lib/store';
 import { deletePath, movePath, putRecord, setAssistantPaused } from '../lib/sync';
-import { createChat, getChatConfig, listChats } from '../lib/chat';
+import { createChat, getChatConfig, listChats, renameChat } from '../lib/chat';
 import type { VaultRecord } from '../lib/types';
 import { SettingsDialog } from './SettingsDialog';
 import { ConfirmDialog, NameDialog, type ConfirmPrompt, type NamePrompt } from './dialogs';
@@ -62,8 +69,9 @@ interface TreeNode {
 function buildTree(records: Map<string, VaultRecord>): TreeNode[] {
   const roots: TreeNode[] = [];
   const byPath = new Map<string, TreeNode>();
+  // Hidden namespaces stay hidden; chats live in the Chats section, not here.
   const sorted = [...records.values()]
-    .filter((r) => !r.path.startsWith('.'))
+    .filter((r) => !r.path.startsWith('.') && r.path !== 'chats' && !r.path.startsWith('chats/'))
     .sort((a, b) => a.path.localeCompare(b.path));
 
   for (const rec of sorted) {
@@ -82,111 +90,159 @@ function buildTree(records: Map<string, VaultRecord>): TreeNode[] {
   return roots;
 }
 
+// The path being dragged right now — module-level because dataTransfer
+// payloads aren't readable during dragover, only on drop.
+let dragPath: string | null = null;
+
 function Node({ node, depth, dialogs }: { node: TreeNode; depth: number; dialogs: DialogApi }) {
   const activePath = useVault((s) => s.activePath);
   const openFile = useVault((s) => s.openFile);
-  const setActiveChat = useVault((s) => s.setActiveChat);
   const [open, setOpen] = useState(depth < 1);
+  const [dropTarget, setDropTarget] = useState(false);
 
-  const isChat = /^chats\/[^/]+$/.test(node.path);
   const active = activePath === node.path;
 
   const onClick = () => {
-    if (isChat) setActiveChat(node.path);
-    else if (node.type === 'folder') setOpen(!open);
+    if (node.type === 'folder') setOpen(!open);
     else openFile(node.path, 'read');
   };
 
-  const IconComp = isChat ? MessageSquare : node.type === 'folder' ? (open ? FolderOpen : Folder) : FileText;
+  const IconComp = node.type === 'folder' ? (open ? FolderOpen : Folder) : FileText;
+
+  /* actions shared by the hover "…" dropdown and the right-click menu */
+
+  const askNewNoteInside = () =>
+    dialogs.ask({
+      title: 'New note',
+      placeholder: 'Note name',
+      onSubmit: async (name) => {
+        const path = `${node.path}/${name.replace(/\.md$/, '')}.md`;
+        await putRecord(path, 'file', `# ${name}\n`);
+        openFile(path, 'edit');
+        setOpen(true);
+      },
+    });
+
+  const askRename = () =>
+    dialogs.ask({
+      title: 'Rename / move',
+      description: 'Edit the full path to rename or move.',
+      initial: node.path,
+      action: 'Save',
+      onSubmit: async (to) => {
+        if (to === node.path) return;
+        await movePath(node.path, to.replace(/\.md$/, '') + (node.type === 'file' ? '.md' : ''));
+      },
+    });
+
+  const confirmDelete = () =>
+    dialogs.confirm({
+      title: `Delete ${node.name.replace(/\.md$/, '')}?`,
+      description: node.type === 'folder' ? 'Everything inside this folder will be deleted.' : undefined,
+      onConfirm: () => deletePath(node.path),
+    });
+
+  const menuItems = (Item: ElementType, Sep: ElementType) => (
+    <>
+      {node.type === 'folder' && (
+        <>
+          <Item onClick={askNewNoteInside}>
+            <Plus /> New note inside
+          </Item>
+          <Sep />
+        </>
+      )}
+      <Item onClick={askRename}>
+        <PencilLine /> Rename / move
+      </Item>
+      <Item variant="destructive" onClick={confirmDelete}>
+        <Trash2 /> Delete
+      </Item>
+    </>
+  );
+
+  /* drag & drop — folders accept anything that isn't themselves, their own
+     parent's no-op, or one of their descendants */
+
+  const acceptsDrop = () =>
+    node.type === 'folder' &&
+    dragPath !== null &&
+    dragPath !== node.path &&
+    !node.path.startsWith(dragPath + '/') &&
+    dragPath.split('/').slice(0, -1).join('/') !== node.path;
 
   return (
     <div>
-      <div
-        className={cn(
-          'tree-row group flex h-7 cursor-pointer items-center gap-1.5 rounded-lg pr-1 text-[13px] text-neutral-600 transition-colors select-none',
-          'hover:bg-neutral-200/55 hover:text-neutral-900',
-          active && 'bg-white text-neutral-900 shadow-xs'
-        )}
-        style={{ paddingLeft: 8 + depth * 14 }}
-        onClick={onClick}
-      >
-        {node.type === 'folder' && !isChat ? (
-          <ChevronRight
-            className={cn('size-3 shrink-0 text-neutral-400 transition-transform duration-150', open && 'rotate-90')}
-          />
-        ) : (
-          <span className="w-3 shrink-0" />
-        )}
-        <IconComp className="size-[15px] shrink-0 text-neutral-400" />
-        <span className="tree-name flex-1 truncate">{node.name.replace(/\.md$/, '')}</span>
-        <span onClick={(e) => e.stopPropagation()}>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="size-6 opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100"
-                title="Actions"
-              >
-                <MoreHorizontal className="size-3.5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-44">
-              {node.type === 'folder' && !isChat && (
-                <>
-                  <DropdownMenuItem
-                    onClick={() =>
-                      dialogs.ask({
-                        title: 'New note',
-                        placeholder: 'Note name',
-                        onSubmit: async (name) => {
-                          const path = `${node.path}/${name.replace(/\.md$/, '')}.md`;
-                          await putRecord(path, 'file', `# ${name}\n`);
-                          openFile(path, 'edit');
-                          setOpen(true);
-                        },
-                      })
-                    }
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div
+            className={cn(
+              'tree-row group flex h-7 cursor-pointer items-center gap-1.5 rounded-lg pr-1 text-[13px] text-neutral-600 transition-colors select-none',
+              'hover:bg-neutral-200/55 hover:text-neutral-900',
+              active && 'bg-white text-neutral-900 shadow-xs',
+              dropTarget && 'bg-neutral-200/80 text-neutral-900 ring-1 ring-neutral-400/60 ring-inset'
+            )}
+            style={{ paddingLeft: 8 + depth * 14 }}
+            onClick={onClick}
+            draggable
+            onDragStart={(e) => {
+              dragPath = node.path;
+              e.dataTransfer.setData('text/plain', node.path);
+              e.dataTransfer.effectAllowed = 'move';
+            }}
+            onDragEnd={() => {
+              dragPath = null;
+            }}
+            onDragOver={(e) => {
+              if (!acceptsDrop()) return;
+              e.preventDefault();
+              e.stopPropagation();
+              e.dataTransfer.dropEffect = 'move';
+              setDropTarget(true);
+            }}
+            onDragLeave={() => setDropTarget(false)}
+            onDrop={async (e) => {
+              setDropTarget(false);
+              if (!acceptsDrop()) return;
+              e.preventDefault();
+              e.stopPropagation();
+              const src = dragPath!;
+              dragPath = null;
+              setOpen(true);
+              await movePath(src, `${node.path}/${src.split('/').pop()}`);
+            }}
+          >
+            {node.type === 'folder' ? (
+              <ChevronRight
+                className={cn('size-3 shrink-0 text-neutral-400 transition-transform duration-150', open && 'rotate-90')}
+              />
+            ) : (
+              <span className="w-3 shrink-0" />
+            )}
+            <IconComp className="size-[15px] shrink-0 text-neutral-400" />
+            <span className="tree-name flex-1 truncate">{node.name.replace(/\.md$/, '')}</span>
+            <span onClick={(e) => e.stopPropagation()}>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="size-6 opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100"
+                    title="Actions"
                   >
-                    <Plus /> New note inside
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                </>
-              )}
-              <DropdownMenuItem
-                onClick={() =>
-                  dialogs.ask({
-                    title: 'Rename / move',
-                    description: 'Edit the full path to rename or move.',
-                    initial: node.path,
-                    action: 'Save',
-                    onSubmit: async (to) => {
-                      if (to === node.path) return;
-                      await movePath(node.path, to.replace(/\.md$/, '') + (node.type === 'file' ? '.md' : ''));
-                    },
-                  })
-                }
-              >
-                <PencilLine /> Rename / move
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                variant="destructive"
-                onClick={() =>
-                  dialogs.confirm({
-                    title: `Delete ${node.name.replace(/\.md$/, '')}?`,
-                    description:
-                      node.type === 'folder' ? 'Everything inside this folder will be deleted.' : undefined,
-                    onConfirm: () => deletePath(node.path),
-                  })
-                }
-              >
-                <Trash2 /> Delete
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </span>
-      </div>
-      {node.type === 'folder' && open && !isChat && (
+                    <MoreHorizontal className="size-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-44">
+                  {menuItems(DropdownMenuItem, DropdownMenuSeparator)}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </span>
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="w-44">{menuItems(ContextMenuItem, ContextMenuSeparator)}</ContextMenuContent>
+      </ContextMenu>
+      {node.type === 'folder' && open && (
         <div>
           {node.children.map((child) => (
             <Node key={child.path} node={child} depth={depth + 1} dialogs={dialogs} />
@@ -201,7 +257,20 @@ function FilesSection({ dialogs }: { dialogs: DialogApi }) {
   const records = useVault((s) => s.records);
   const tree = useMemo(() => buildTree(records), [records]);
   return (
-    <div className="tree flex flex-col gap-px">
+    <div
+      className="tree flex min-h-full flex-col gap-px pb-4"
+      // Dropping on empty space (below the rows) moves the item to the root.
+      onDragOver={(e) => {
+        if (dragPath && dragPath.includes('/')) e.preventDefault();
+      }}
+      onDrop={async (e) => {
+        if (!dragPath || !dragPath.includes('/')) return;
+        e.preventDefault();
+        const src = dragPath;
+        dragPath = null;
+        await movePath(src, src.split('/').pop()!);
+      }}
+    >
       {tree.map((node) => (
         <Node key={node.path} node={node} depth={0} dialogs={dialogs} />
       ))}
@@ -219,7 +288,7 @@ function timeAgo(ts: number): string {
   return `${Math.round(s / 86400)}d`;
 }
 
-function ChatsSection() {
+function ChatsSection({ dialogs }: { dialogs: DialogApi }) {
   const records = useVault((s) => s.records);
   const activeChat = useVault((s) => s.activeChat);
   const setActiveChat = useVault((s) => s.setActiveChat);
@@ -228,19 +297,56 @@ function ChatsSection() {
   return (
     <div className="panel-list flex flex-col gap-px">
       {chats.map((c) => (
-        <div
-          key={c.path}
-          className={cn(
-            'panel-row flex h-8 cursor-pointer items-center gap-2 rounded-lg px-2 text-[13px] text-neutral-600 transition-colors select-none',
-            'hover:bg-neutral-200/55 hover:text-neutral-900',
-            activeChat === c.path && 'bg-white text-neutral-900 shadow-xs'
-          )}
-          onClick={() => setActiveChat(c.path)}
-        >
-          <MessageSquare className="size-[15px] shrink-0 text-neutral-400" />
-          <span className="flex-1 truncate">{c.title}</span>
-          <span className="font-mono text-[10px] text-neutral-400">{timeAgo(c.mtime)}</span>
-        </div>
+        <ContextMenu key={c.path}>
+          <ContextMenuTrigger asChild>
+            <div
+              className={cn(
+                'panel-row flex h-8 cursor-pointer items-center gap-2 rounded-lg px-2 text-[13px] text-neutral-600 transition-colors select-none',
+                'hover:bg-neutral-200/55 hover:text-neutral-900',
+                activeChat === c.path && 'bg-white text-neutral-900 shadow-xs'
+              )}
+              onClick={() => setActiveChat(c.path)}
+            >
+              <MessageSquare className="size-[15px] shrink-0 text-neutral-400" />
+              <span className="flex-1 truncate">{c.title}</span>
+              <span className="font-mono text-[10px] text-neutral-400">{timeAgo(c.mtime)}</span>
+            </div>
+          </ContextMenuTrigger>
+          <ContextMenuContent className="w-44">
+            <ContextMenuItem onClick={() => setActiveChat(c.path)}>
+              <MessageSquare /> Open
+            </ContextMenuItem>
+            <ContextMenuItem
+              onClick={() =>
+                dialogs.ask({
+                  title: 'Rename chat',
+                  placeholder: 'Chat title',
+                  initial: c.title,
+                  action: 'Save',
+                  onSubmit: (title) => renameChat(records, c.path, title),
+                })
+              }
+            >
+              <PencilLine /> Rename
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuItem
+              variant="destructive"
+              onClick={() =>
+                dialogs.confirm({
+                  title: `Delete "${c.title}"?`,
+                  description: 'The whole conversation will be deleted.',
+                  onConfirm: async () => {
+                    if (activeChat === c.path) setActiveChat(null);
+                    await deletePath(c.path);
+                  },
+                })
+              }
+            >
+              <Trash2 /> Delete
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
       ))}
       {!chats.length && <div className="px-2 py-4 text-xs text-neutral-400">No chats yet.</div>}
     </div>
@@ -305,11 +411,15 @@ function CustomizeItem({ className }: { className: (active: boolean) => string }
   };
   const closeSoon = () => {
     clearTimeout(closeTimer.current);
-    closeTimer.current = setTimeout(() => setOpen(false), 160);
+    closeTimer.current = setTimeout(() => setOpen(false), 220);
   };
 
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
+    // modal={false} keeps pointer events alive on the rest of the page while
+    // the menu is open — with the default modal behavior, opening the menu
+    // fires a synthetic mouseleave on the trigger, which starts the close
+    // timer, which closes and re-opens the menu in a loop (the flicker).
+    <DropdownMenu open={open} onOpenChange={setOpen} modal={false}>
       <DropdownMenuTrigger asChild>
         <button
           title="Customize"
@@ -329,6 +439,9 @@ function CustomizeItem({ className }: { className: (active: boolean) => string }
         className="customize-menu w-44"
         onMouseEnter={openNow}
         onMouseLeave={closeSoon}
+        // Returning focus to the trigger on close re-triggers hover state and
+        // makes the row flash; skip it.
+        onCloseAutoFocus={(e) => e.preventDefault()}
       >
         <DropdownMenuItem onClick={() => setMainView('skills')}>
           <Zap /> Skills
@@ -481,7 +594,7 @@ export function Sidebar() {
       {/* active section */}
       <div className="quiet-scroll -mx-1 flex-1 overflow-y-auto px-1">
         {railTab === 'files' && <FilesSection dialogs={dialogs} />}
-        {railTab === 'chats' && <ChatsSection />}
+        {railTab === 'chats' && <ChatsSection dialogs={dialogs} />}
         {railTab === 'devices' && <DevicesSection />}
       </div>
 

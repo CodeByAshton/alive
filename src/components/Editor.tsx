@@ -19,6 +19,18 @@ import { Markdown } from './Markdown';
 import { Properties } from './Properties';
 import { SaveIndicator, useSaveFeedback } from './SaveIndicator';
 
+// Split a leading "# Title" line (ignoring blank lines before it) off the
+// body so the reading view can slot the properties directly beneath it.
+function splitLeadingHeading(body: string): { heading: string | null; rest: string } {
+  const lines = body.split('\n');
+  let i = 0;
+  while (i < lines.length && !lines[i].trim()) i++;
+  if (i < lines.length && /^#\s+\S/.test(lines[i])) {
+    return { heading: lines[i], rest: lines.slice(i + 1).join('\n') };
+  }
+  return { heading: null, rest: body };
+}
+
 export function Editor() {
   const activePath = useVault((s) => s.activePath);
   const record = useVault((s) => (s.activePath ? s.records.get(s.activePath) : undefined));
@@ -82,6 +94,10 @@ export function Editor() {
     [record?.content]
   );
 
+  // Reading view order: title first, properties under it, then the body —
+  // so a leading H1 is split off and rendered above the metadata.
+  const { heading, rest } = useMemo(() => splitLeadingHeading(parsed.body), [parsed.body]);
+
   if (!activePath) {
     return (
       <div className="editor flex flex-1 flex-col items-center justify-center gap-2 text-neutral-400">
@@ -129,8 +145,13 @@ export function Editor() {
       ) : (
         <div className="editor-preview quiet-scroll flex-1 overflow-y-auto">
           <div className="mx-auto max-w-[72ch] px-8 py-8 pb-[35vh]">
+            {heading && (
+              <div className="note-title mb-4">
+                <Markdown text={heading} />
+              </div>
+            )}
             {record && <Properties key={record.path} record={record} />}
-            <Markdown text={parsed.body} />
+            <Markdown text={rest} />
           </div>
         </div>
       )}

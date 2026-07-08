@@ -3,11 +3,17 @@
 // calls) stays in the files' frontmatter — the UI shows prose, attachments,
 // and a friendly status line while the assistant works.
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUp, FileText, Mic, Paperclip, Plus, ShieldCheck, X } from 'lucide-react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { ArrowUp, Copy, FileText, Mic, Paperclip, Plus, ShieldCheck, X } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,12 +25,34 @@ import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { useVault } from '../lib/store';
 import { chatMessages, createChat, getChatConfig, listChats } from '../lib/chat';
+import { listSkills } from '../lib/skills';
 import { respondToApproval, sendTurn } from '../lib/sync';
 import { voice } from '../lib/voice';
 import type { StreamState } from '../lib/types';
 import { basename } from '../lib/wikilinks';
 import { Markdown } from './Markdown';
 import { ModelPicker } from './ModelPicker';
+
+// A five-bar Siri-style waveform shown while the mic is live.
+export function DictationWave({ className }: { className?: string }) {
+  return (
+    <span className={cn('dictation-wave', className)} aria-hidden>
+      <span />
+      <span />
+      <span />
+      <span />
+      <span />
+    </span>
+  );
+}
+
+// One entry in the composer's inline autocomplete (slash commands / [[refs]]).
+interface Suggestion {
+  id: string;
+  label: string;
+  detail: string;
+  insert: string;
+}
 
 const THINKING_PHRASES = [
   'Thinking…',
@@ -137,27 +165,93 @@ export function Chat({ compact = false }: { compact?: boolean }) {
   const [listening, setListening] = useState(false);
   const stopListenRef = useRef<(() => void) | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Inline autocomplete: '/' at the start of the draft offers commands,
+  // '[[' anywhere offers note references.
+  const [menu, setMenu] = useState<{ kind: 'slash' | 'ref'; query: string; start: number } | null>(null);
+  const [menuIndex, setMenuIndex] = useState(0);
 
   const chats = useMemo(() => listChats(records), [records]);
   const messages = useMemo(() => (activeChat ? chatMessages(records, activeChat) : []), [records, activeChat]);
 
-  // Notes offered by the attach button — most recently edited first.
-  const attachable = useMemo(
+  // Notes usable as attachments and [[references]] — most recently edited first.
+  const notes = useMemo(
     () =>
       [...records.values()]
         .filter((r) => r.type === 'file' && r.path.endsWith('.md') && !r.path.startsWith('chats/') && !r.path.startsWith('.'))
-        .sort((a, b) => b.mtime - a.mtime)
-        .slice(0, 15),
+        .sort((a, b) => b.mtime - a.mtime),
     [records]
   );
+  const attachable = useMemo(() => notes.slice(0, 15), [notes]);
+  const skills = useMemo(() => listSkills(records).filter((s) => s.trigger.startsWith('/')), [records]);
+
+  const suggestions = useMemo<Suggestion[]>(() => {
+    if (!menu) return [];
+    const q = menu.query.toLowerCase();
+    if (menu.kind === 'slash') {
+      return skills
+        .filter((s) => s.trigger.slice(1).toLowerCase().startsWith(q))
+        .map((s) => ({
+          id: s.path,
+          label: s.trigger,
+          detail: s.description || s.name,
+          insert: `${s.trigger} `,
+        }));
+    }
+    return notes
+      .filter((r) => basename(r.path).toLowerCase().includes(q))
+      .slice(0, 8)
+      .map((r) => ({
+        id: r.path,
+        label: basename(r.path),
+        detail: r.path.split('/').slice(0, -1).join('/'),
+        insert: `[[${basename(r.path)}]] `,
+      }));
+  }, [menu, skills, notes]);
+
+  useEffect(() => setMenuIndex(0), [menu?.kind, menu?.query]);
+
+  const refreshMenu = (value: string, caret: number) => {
+    const before = value.slice(0, caret);
+    const slash = before.match(/^\/([\w-]*)$/);
+    if (slash) return setMenu({ kind: 'slash', query: slash[1], start: 0 });
+    const ref = before.match(/\[\[([^\][]*)$/);
+    if (ref) return setMenu({ kind: 'ref', query: ref[1], start: caret - ref[1].length - 2 });
+    setMenu(null);
+  };
+
+  const applySuggestion = (s: Suggestion) => {
+    if (!menu) return;
+    const el = textareaRef.current;
+    const caret = el?.selectionStart ?? draft.length;
+    setDraft(draft.slice(0, menu.start) + s.insert + draft.slice(caret));
+    const pos = menu.start + s.insert.length;
+    setMenu(null);
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(pos, pos);
+    });
+  };
 
   useEffect(() => {
     if (!activeChat && chats.length) setActiveChat(chats[0].path);
   }, [activeChat, chats, setActiveChat]);
 
-  useEffect(() => {
+  // Messages already on screen when a chat opens must not replay their entry
+  // animation — only messages that arrive afterwards animate in.
+  const animateFromRef = useRef(0);
+  const prevChatRef = useRef<string | null | undefined>(undefined);
+  if (prevChatRef.current !== activeChat) {
+    prevChatRef.current = activeChat;
+    animateFromRef.current = messages.length;
+  }
+
+  // Pin to the bottom before paint so switching chats lands settled instead
+  // of visibly jumping.
+  useLayoutEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [messages.length, stream?.text, stream?.tools.length]);
+  }, [activeChat, messages.length, stream?.text, stream?.tools.length]);
 
   const submit = () => {
     let text = draft.trim();
@@ -172,6 +266,7 @@ export function Chat({ compact = false }: { compact?: boolean }) {
     sendTurn(activeChat, text, config.provider, config.model);
     setDraft('');
     setAttachments([]);
+    setMenu(null);
   };
 
   const toggleMic = () => {
@@ -221,33 +316,42 @@ export function Chat({ compact = false }: { compact?: boolean }) {
         </Button>
       </header>
 
-      <div className="chat-scroll quiet-scroll flex flex-1 overflow-y-auto px-4 py-4" ref={scrollRef}>
-        <div className={cn('mx-auto flex min-h-full w-full flex-col gap-3', !compact && 'max-w-3xl')}>
-        {messages.map((m) => (
-          <div
-            key={m.path}
-            className={cn(
-              'bubble flex max-w-[86%] flex-col gap-2 animate-in fade-in-0 slide-in-from-bottom-1 duration-200',
-              m.role === 'user'
-                ? 'user self-end rounded-2xl rounded-br-md bg-neutral-900 px-3.5 py-2 text-white'
-                : 'assistant self-start'
-            )}
-          >
-            {m.role === 'user' ? (
-              <span className="text-[13.5px] leading-normal whitespace-pre-wrap">{m.body}</span>
-            ) : (
-              <>
-                <Markdown text={m.body} size="sm" />
-                {m.filesTouched && m.filesTouched.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {m.filesTouched.map((path) => (
-                      <AttachmentCard key={path} path={path} compact={compact} />
-                    ))}
-                  </div>
+      <div className="chat-scroll quiet-scroll flex flex-1 overflow-y-auto px-4 pt-4 pb-2" ref={scrollRef}>
+        <div className={cn('mx-auto flex min-h-full w-full flex-col gap-3 pb-6', !compact && 'max-w-3xl')}>
+        {messages.map((m, i) => (
+          <ContextMenu key={m.path}>
+            <ContextMenuTrigger asChild>
+              <div
+                className={cn(
+                  'bubble flex max-w-[86%] flex-col gap-2',
+                  i >= animateFromRef.current && 'animate-in fade-in-0 slide-in-from-bottom-1 duration-200',
+                  m.role === 'user'
+                    ? 'user self-end rounded-2xl rounded-br-md bg-neutral-900 px-3.5 py-2 text-white'
+                    : 'assistant self-start'
                 )}
-              </>
-            )}
-          </div>
+              >
+                {m.role === 'user' ? (
+                  <span className="text-[13.5px] leading-normal whitespace-pre-wrap">{m.body}</span>
+                ) : (
+                  <>
+                    <Markdown text={m.body} size="sm" />
+                    {m.filesTouched && m.filesTouched.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {m.filesTouched.map((path) => (
+                          <AttachmentCard key={path} path={path} compact={compact} />
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </ContextMenuTrigger>
+            <ContextMenuContent className="w-44">
+              <ContextMenuItem onClick={() => navigator.clipboard?.writeText(m.body)}>
+                <Copy /> Copy message
+              </ContextMenuItem>
+            </ContextMenuContent>
+          </ContextMenu>
         ))}
 
         {approvals.map((a) => (
@@ -280,8 +384,38 @@ export function Chat({ compact = false }: { compact?: boolean }) {
         </div>
       </div>
 
-      <div className={cn('composer mx-auto w-full shrink-0 px-3 pb-3', !compact && 'max-w-3xl')}>
-        <div className="flex flex-col gap-1 rounded-2xl border bg-white p-2 shadow-xs transition-colors focus-within:border-neutral-400">
+      <div className={cn('composer mx-auto w-full shrink-0 px-3 pt-1 pb-3', !compact && 'max-w-3xl')}>
+        <div className="relative flex flex-col gap-1 rounded-2xl border bg-white p-2 shadow-xs transition-colors focus-within:border-neutral-400">
+          {menu && suggestions.length > 0 && (
+            <div className="composer-menu absolute inset-x-0 bottom-full z-30 mb-2 overflow-hidden rounded-xl border bg-white shadow-md animate-in fade-in-0 slide-in-from-bottom-1 duration-150">
+              <div className="quiet-scroll max-h-56 overflow-y-auto p-1">
+                {suggestions.map((s, i) => (
+                  <button
+                    key={s.id}
+                    className={cn(
+                      'flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-[13px] transition-colors',
+                      i === menuIndex ? 'bg-neutral-100 text-neutral-900' : 'text-neutral-600'
+                    )}
+                    onMouseEnter={() => setMenuIndex(i)}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      applySuggestion(s);
+                    }}
+                  >
+                    {menu.kind === 'slash' ? (
+                      <span className="grid size-5 shrink-0 place-items-center rounded-md border bg-neutral-50 font-mono text-[11px] text-neutral-500">
+                        /
+                      </span>
+                    ) : (
+                      <FileText className="size-4 shrink-0 text-neutral-400" />
+                    )}
+                    <span className="shrink-0 font-medium">{s.label}</span>
+                    <span className="min-w-0 flex-1 truncate text-[11.5px] text-neutral-400">{s.detail}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-1 px-1 pt-0.5">
               {attachments.map((path) => (
@@ -299,13 +433,40 @@ export function Chat({ compact = false }: { compact?: boolean }) {
             </div>
           )}
           <Textarea
+            ref={textareaRef}
             value={draft}
-            placeholder={paused ? 'Assistant is paused — resume it from Devices' : activeChat ? 'Message…' : 'Create a chat first'}
+            placeholder={paused ? 'Assistant is paused — resume it from Devices' : activeChat ? 'Message… ("/" for commands, "[[" to reference a note)' : 'Create a chat first'}
             disabled={!activeChat || paused}
             rows={compact ? 1 : 2}
             className="min-h-0 flex-1 resize-none border-0 bg-transparent p-1.5 shadow-none focus-visible:ring-0"
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              refreshMenu(e.target.value, e.target.selectionStart ?? e.target.value.length);
+            }}
+            onBlur={() => setMenu(null)}
             onKeyDown={(e) => {
+              if (menu && suggestions.length > 0) {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  setMenuIndex((i) => (i + 1) % suggestions.length);
+                  return;
+                }
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setMenuIndex((i) => (i - 1 + suggestions.length) % suggestions.length);
+                  return;
+                }
+                if (e.key === 'Enter' || e.key === 'Tab') {
+                  e.preventDefault();
+                  applySuggestion(suggestions[menuIndex]);
+                  return;
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setMenu(null);
+                  return;
+                }
+              }
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 submit();
@@ -341,11 +502,11 @@ export function Chat({ compact = false }: { compact?: boolean }) {
                 variant="ghost"
                 size="icon-sm"
                 title={listening ? 'Stop dictating' : 'Dictate'}
-                className={cn('mic-button', listening && 'animate-pulse text-destructive')}
+                className={cn('mic-button', listening && 'text-destructive')}
                 disabled={!activeChat}
                 onClick={toggleMic}
               >
-                <Mic className="size-4" />
+                {listening ? <DictationWave /> : <Mic className="size-4" />}
               </Button>
             )}
             <Button

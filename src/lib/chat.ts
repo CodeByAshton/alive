@@ -82,6 +82,18 @@ export async function setChatConfig(
   );
 }
 
+// Chats are titled via frontmatter in index.md, not by their folder name —
+// renaming rewrites the title everywhere without moving any records.
+export async function renameChat(
+  records: Map<string, VaultRecord>,
+  chatPath: string,
+  title: string
+): Promise<void> {
+  const index = records.get(`${chatPath}/index.md`);
+  const existing = index ? parseFrontmatter(index.content) : { data: {}, body: '' };
+  await putRecord(`${chatPath}/index.md`, 'file', serializeFrontmatter({ ...existing.data, title }, existing.body));
+}
+
 export async function createChat(defaults: ChatConfig): Promise<string> {
   const stamp = new Date();
   const title = `Chat ${stamp.toISOString().slice(0, 16).replace('T', ' ')}`;

@@ -13,7 +13,7 @@ import { chatMessages, getChatConfig } from '../lib/chat';
 import { onTurnDone, sendTurn } from '../lib/sync';
 import { notificationsEnabled, notificationsSupported, setNotificationsEnabled } from '../lib/notifications';
 import { voice } from '../lib/voice';
-import { Chat } from './Chat';
+import { Chat, DictationWave } from './Chat';
 
 export function Phone() {
   const connected = useVault((s) => s.connected);
@@ -95,12 +95,12 @@ export function Phone() {
         {interim && <div className="interim px-1 font-mono text-xs text-neutral-400">{interim}</div>}
         <Button
           variant={listening ? 'destructive' : 'secondary'}
-          className={cn('mic h-11 rounded-xl text-sm font-medium', listening && 'animate-pulse')}
+          className="mic h-11 rounded-xl text-sm font-medium"
           onClick={toggleMic}
           disabled={!voice.available || !activeChat}
           title={voice.available ? 'Tap to speak' : 'Speech recognition unavailable in this browser'}
         >
-          <Mic className="size-4" />
+          {listening ? <DictationWave /> : <Mic className="size-4" />}
           {listening ? 'Listening — tap to stop' : 'Speak'}
         </Button>
       </div>
