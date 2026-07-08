@@ -130,14 +130,17 @@ export interface Accent {
 }
 
 // Mid-lightness so the same accent reads on light and dark canvases.
+// Mono is the stock look: neutral pills, black primary buttons. Any colored
+// accent takes over the app's primary surfaces (buttons, switches, the user
+// chat bubble, focus rings) as well as wikilinks.
 export const ACCENTS: Accent[] = [
+  { id: 'mono', name: 'Mono', value: 'oklch(0.4 0 0)' },
   { id: 'indigo', name: 'Indigo', value: 'oklch(0.51 0.14 262)' },
   { id: 'blue', name: 'Blue', value: 'oklch(0.55 0.13 240)' },
   { id: 'violet', name: 'Violet', value: 'oklch(0.53 0.15 300)' },
   { id: 'green', name: 'Green', value: 'oklch(0.55 0.12 155)' },
   { id: 'amber', name: 'Amber', value: 'oklch(0.62 0.12 70)' },
   { id: 'rose', name: 'Rose', value: 'oklch(0.55 0.15 15)' },
-  { id: 'mono', name: 'Mono', value: 'oklch(0.4 0 0)' },
 ];
 
 // Default-theme ramp values, used when high contrast needs to promote a step
@@ -154,7 +157,19 @@ export function applyAppearance(settings: AppSettings): void {
   const theme = THEMES.find((t) => t.id === settings.theme) ?? THEMES[0];
   const accent = ACCENTS.find((a) => a.id === settings.accent) ?? ACCENTS[0];
 
-  const vars: Record<string, string> = { ...theme.vars, '--accent-color': accent.value };
+  const vars: Record<string, string> = {
+    ...theme.vars,
+    '--accent-color': accent.value,
+    '--content-width': settings.contentWidth === 'wide' ? '92ch' : '72ch',
+  };
+
+  // A colored accent takes over the primary surfaces so the choice is
+  // unmistakable; Mono keeps the theme's own (neutral) primary.
+  if (accent.id !== 'mono') {
+    vars['--primary'] = accent.value;
+    vars['--primary-foreground'] = 'oklch(0.985 0 0)';
+    vars['--ring'] = `color-mix(in oklab, ${accent.value} 65%, transparent)`;
+  }
 
   // High contrast is theme-relative: promote hairlines and the faintest text
   // steps to darker steps of whatever ramp is active.

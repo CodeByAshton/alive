@@ -50,7 +50,7 @@ export function PluginsView() {
                   </span>
                   <Switch
                     checked={on}
-                    onCheckedChange={(v) => setPluginEnabled(records, plugin.id, v)}
+                    onCheckedChange={(v) => setPluginEnabled(plugin.id, v)}
                     aria-label={`Toggle ${plugin.name}`}
                   />
                 </div>

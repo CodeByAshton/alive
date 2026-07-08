@@ -4,15 +4,27 @@
 // via the .vault/settings.md record; instructions save on demand.
 
 import { useEffect, useState } from 'react';
-import { ArrowDown, ArrowUp, Check, Download, LogOut, RotateCcw, Settings } from 'lucide-react';
+import {
+  ArrowDown,
+  ArrowUp,
+  Check,
+  Download,
+  LogOut,
+  Palette,
+  PencilRuler,
+  PersonStanding,
+  Puzzle,
+  RotateCcw,
+  Settings,
+  Settings2,
+  UserRound,
+} from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
-  DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
@@ -24,7 +36,6 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { useVault } from '../lib/store';
@@ -33,6 +44,7 @@ import { getServerConfig } from '../lib/config';
 import { authMode, authQuery, getAuthClient, signOut } from '../lib/auth';
 import { getDeviceId, getSurface } from '../lib/device';
 import { ACCENTS, THEMES, type Theme } from '../lib/appearance';
+import { enabledPlugins, setPluginEnabled, PLUGINS } from '../lib/plugins';
 import {
   isMenuCustomized,
   moveMenuItem,
@@ -279,6 +291,71 @@ function AppearanceSection({ settings }: { settings: AppSettings }) {
   );
 }
 
+/* ── Editor ───────────────────────────────────────────────────────────── */
+
+function EditorSection({ settings }: { settings: AppSettings }) {
+  const records = useVault((s) => s.records);
+  return (
+    <div className="flex flex-col gap-3">
+      <SettingRow title="Open notes in" hint="How a note appears when you click it in the tree or search.">
+        <Select
+          value={settings.defaultMode}
+          onValueChange={(v) => updateSettings(records, { defaultMode: v as 'read' | 'edit' })}
+        >
+          <SelectTrigger size="sm" className="default-mode-select w-32 shrink-0 bg-white">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent align="end">
+            <SelectItem value="read">Reading view</SelectItem>
+            <SelectItem value="edit">Edit view</SelectItem>
+          </SelectContent>
+        </Select>
+      </SettingRow>
+      <SettingRow title="Content width" hint="The measure of the note column, in both views.">
+        <Select
+          value={settings.contentWidth}
+          onValueChange={(v) => updateSettings(records, { contentWidth: v as 'normal' | 'wide' })}
+        >
+          <SelectTrigger size="sm" className="w-32 shrink-0 bg-white">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent align="end">
+            <SelectItem value="normal">Normal</SelectItem>
+            <SelectItem value="wide">Wide</SelectItem>
+          </SelectContent>
+        </Select>
+      </SettingRow>
+      <p className="px-0.5 text-xs leading-relaxed text-neutral-400">
+        Edit view is a live preview — headings, bold, links and code style themselves as you type. In reading
+        view, task checkboxes are clickable and edit the note directly.
+      </p>
+    </div>
+  );
+}
+
+/* ── Plugins ──────────────────────────────────────────────────────────── */
+
+function PluginsSection() {
+  const records = useVault((s) => s.records);
+  const enabled = enabledPlugins(records);
+  return (
+    <div className="flex flex-col gap-3">
+      {PLUGINS.map((plugin) => (
+        <SettingRow key={plugin.id} title={plugin.name} hint={plugin.description}>
+          <Switch
+            checked={enabled.has(plugin.id)}
+            onCheckedChange={(v) => setPluginEnabled(plugin.id, v)}
+            aria-label={`Toggle ${plugin.name}`}
+          />
+        </SettingRow>
+      ))}
+      <p className="px-0.5 text-xs leading-relaxed text-neutral-400">
+        Also available under Customize → Plugins in the sidebar.
+      </p>
+    </div>
+  );
+}
+
 /* ── Accessibility ────────────────────────────────────────────────────── */
 
 function AccessibilitySection({ settings }: { settings: AppSettings }) {
@@ -387,23 +464,37 @@ function AccountSection() {
   );
 }
 
-/* ── dialog shell ─────────────────────────────────────────────────────── */
+/* ── dialog shell: side menu of sections, content on the right ────────── */
+
+const SECTIONS = [
+  { id: 'general', label: 'General', icon: Settings2, hint: 'Assistant mode and standing instructions.' },
+  { id: 'editor', label: 'Editor', icon: PencilRuler, hint: 'How notes open and read.' },
+  { id: 'appearance', label: 'Appearance', icon: Palette, hint: 'Theme, accent, scale, and the sidebar menu.' },
+  { id: 'accessibility', label: 'Accessibility', icon: PersonStanding, hint: 'Motion, contrast, and size.' },
+  { id: 'plugins', label: 'Plugins', icon: Puzzle, hint: 'Built-in features you can switch on and off.' },
+  { id: 'account', label: 'Account', icon: UserRound, hint: 'Identity, server, and your data.' },
+] as const;
 
 export function SettingsDialog() {
   const record = useVault((s) => s.records.get(AGENT_PATH));
   const settings = useSettings();
   const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState('general');
+  const [tab, setTab] = useState<(typeof SECTIONS)[number]['id']>('general');
   const [draft, setDraft] = useState('');
 
   useEffect(() => {
-    if (open) setDraft(record?.content ?? '');
+    if (open) {
+      setDraft(record?.content ?? '');
+      setTab('general');
+    }
   }, [open, record?.content]);
 
   const save = async () => {
     if (draft !== (record?.content ?? '')) await putRecord(AGENT_PATH, 'file', draft);
     setOpen(false);
   };
+
+  const current = SECTIONS.find((s) => s.id === tab) ?? SECTIONS[0];
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -412,34 +503,58 @@ export function SettingsDialog() {
           <Settings className="size-4" />
         </Button>
       </DialogTrigger>
-      <DialogContent className="settings-dialog flex max-h-[85vh] flex-col sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Settings</DialogTitle>
-          <DialogDescription>Shared by every device — change it here, see it everywhere.</DialogDescription>
-        </DialogHeader>
+      <DialogContent className="settings-dialog flex h-[80vh] max-h-[680px] flex-row gap-0 overflow-hidden p-0 sm:max-w-3xl">
+        <DialogTitle className="sr-only">Settings</DialogTitle>
+        <DialogDescription className="sr-only">
+          Shared by every device — change it here, see it everywhere.
+        </DialogDescription>
 
-        <Tabs value={tab} onValueChange={setTab}>
-          <TabsList className="settings-tabs">
-            <TabsTrigger value="general">General</TabsTrigger>
-            <TabsTrigger value="appearance">Appearance</TabsTrigger>
-            <TabsTrigger value="accessibility">Accessibility</TabsTrigger>
-            <TabsTrigger value="account">Account</TabsTrigger>
-          </TabsList>
-        </Tabs>
+        {/* side menu */}
+        <aside className="settings-nav flex w-48 shrink-0 flex-col gap-px border-r bg-neutral-50/70 p-3">
+          <div className="px-2 pt-0.5 pb-3 text-sm font-semibold tracking-tight">Settings</div>
+          {SECTIONS.map((s) => (
+            <button
+              key={s.id}
+              data-section={s.id}
+              className={cn(
+                'flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 text-[13px] font-medium transition-colors select-none',
+                tab === s.id
+                  ? 'bg-white text-neutral-900 shadow-xs'
+                  : 'text-neutral-600 hover:bg-neutral-200/55 hover:text-neutral-900'
+              )}
+              onClick={() => setTab(s.id)}
+            >
+              <s.icon className="size-4 text-neutral-400" />
+              {s.label}
+            </button>
+          ))}
+          <span className="flex-1" />
+          <p className="px-2 pb-1 text-[10.5px] leading-relaxed text-neutral-400">
+            Settings sync to every device.
+          </p>
+        </aside>
 
-        <div className="quiet-scroll -mx-1 min-h-64 flex-1 overflow-y-auto px-1 py-1">
-          {tab === 'general' && <GeneralSection draft={draft} setDraft={setDraft} />}
-          {tab === 'appearance' && <AppearanceSection settings={settings} />}
-          {tab === 'accessibility' && <AccessibilitySection settings={settings} />}
-          {tab === 'account' && <AccountSection />}
+        {/* section content */}
+        <div className="flex min-w-0 flex-1 flex-col">
+          <header className="flex h-12 shrink-0 items-center gap-2 border-b px-5">
+            <span className="text-[13px] font-semibold">{current.label}</span>
+            <span className="truncate text-[11.5px] text-neutral-400">{current.hint}</span>
+          </header>
+          <div className="quiet-scroll flex-1 overflow-y-auto p-5">
+            {tab === 'general' && <GeneralSection draft={draft} setDraft={setDraft} />}
+            {tab === 'editor' && <EditorSection settings={settings} />}
+            {tab === 'appearance' && <AppearanceSection settings={settings} />}
+            {tab === 'accessibility' && <AccessibilitySection settings={settings} />}
+            {tab === 'plugins' && <PluginsSection />}
+            {tab === 'account' && <AccountSection />}
+          </div>
+          <footer className="flex shrink-0 items-center justify-end gap-2 border-t px-5 py-3">
+            <Button variant="outline" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={save}>Save</Button>
+          </footer>
         </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>
-            Cancel
-          </Button>
-          <Button onClick={save}>Save</Button>
-        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

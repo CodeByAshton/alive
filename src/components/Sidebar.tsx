@@ -60,6 +60,7 @@ import { cn } from '@/lib/utils';
 import { useVault } from '../lib/store';
 import { deletePath, movePath, putRecord, setAssistantPaused } from '../lib/sync';
 import { createChat, getChatConfig, listChats, renameChat } from '../lib/chat';
+import { dragState } from '../lib/dragState';
 import { createFromTemplate, enabledPlugins, listTemplates, openDailyNote, usePlugin } from '../lib/plugins';
 import {
   isMenuCustomized,
@@ -69,7 +70,7 @@ import {
   setMenuItemHidden,
   visibleMenu,
 } from '../lib/menu';
-import { useSettings } from '../lib/settings';
+import { getSettings, useSettings } from '../lib/settings';
 import type { VaultRecord } from '../lib/types';
 import { SettingsDialog } from './SettingsDialog';
 import { ConfirmDialog, NameDialog, type ConfirmPrompt, type NamePrompt } from './dialogs';
@@ -113,10 +114,6 @@ function buildTree(records: Map<string, VaultRecord>): TreeNode[] {
   sortNodes(roots);
   return roots;
 }
-
-// The path being dragged right now — module-level because dataTransfer
-// payloads aren't readable during dragover, only on drop.
-let dragPath: string | null = null;
 
 // "Foo.md" -> "Foo copy.md" -> "Foo copy 2.md" (first free slot).
 function uniqueCopyPath(records: Map<string, VaultRecord>, path: string): string {
@@ -167,7 +164,7 @@ function Node({ node, depth, dialogs }: { node: TreeNode; depth: number; dialogs
 
   const onClick = () => {
     if (node.type === 'folder') setOpen(!open);
-    else openFile(node.path, 'read');
+    else openFile(node.path, getSettings(records).defaultMode);
   };
 
   const IconComp = node.type === 'folder' ? (open ? FolderOpen : Folder) : FileText;
@@ -331,10 +328,10 @@ function Node({ node, depth, dialogs }: { node: TreeNode; depth: number; dialogs
 
   const acceptsDrop = () =>
     node.type === 'folder' &&
-    dragPath !== null &&
-    dragPath !== node.path &&
-    !node.path.startsWith(dragPath + '/') &&
-    dragPath.split('/').slice(0, -1).join('/') !== node.path;
+    dragState.path !== null &&
+    dragState.path !== node.path &&
+    !node.path.startsWith(dragState.path + '/') &&
+    dragState.path.split('/').slice(0, -1).join('/') !== node.path;
 
   return (
     <div>
@@ -351,12 +348,12 @@ function Node({ node, depth, dialogs }: { node: TreeNode; depth: number; dialogs
             onClick={onClick}
             draggable
             onDragStart={(e) => {
-              dragPath = node.path;
+              dragState.path = node.path;
               e.dataTransfer.setData('text/plain', node.path);
               e.dataTransfer.effectAllowed = 'move';
             }}
             onDragEnd={() => {
-              dragPath = null;
+              dragState.path = null;
             }}
             onDragOver={(e) => {
               if (!acceptsDrop()) return;
@@ -371,8 +368,8 @@ function Node({ node, depth, dialogs }: { node: TreeNode; depth: number; dialogs
               if (!acceptsDrop()) return;
               e.preventDefault();
               e.stopPropagation();
-              const src = dragPath!;
-              dragPath = null;
+              const src = dragState.path!;
+              dragState.path = null;
               setOpen(true);
               await movePath(src, `${node.path}/${src.split('/').pop()}`);
             }}
@@ -426,13 +423,13 @@ function FilesSection({ dialogs }: { dialogs: DialogApi }) {
       className="tree flex min-h-full flex-col gap-px pb-4"
       // Dropping on empty space (below the rows) moves the item to the root.
       onDragOver={(e) => {
-        if (dragPath && dragPath.includes('/')) e.preventDefault();
+        if (dragState.path && dragState.path.includes('/')) e.preventDefault();
       }}
       onDrop={async (e) => {
-        if (!dragPath || !dragPath.includes('/')) return;
+        if (!dragState.path || !dragState.path.includes('/')) return;
         e.preventDefault();
-        const src = dragPath;
-        dragPath = null;
+        const src = dragState.path;
+        dragState.path = null;
         await movePath(src, src.split('/').pop()!);
       }}
     >

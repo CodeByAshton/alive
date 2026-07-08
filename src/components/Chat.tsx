@@ -326,7 +326,7 @@ export function Chat({ compact = false }: { compact?: boolean }) {
                   'bubble flex max-w-[86%] flex-col gap-2',
                   i >= animateFromRef.current && 'animate-in fade-in-0 slide-in-from-bottom-1 duration-200',
                   m.role === 'user'
-                    ? 'user self-end rounded-2xl rounded-br-md bg-neutral-900 px-3.5 py-2 text-white'
+                    ? 'user self-end rounded-2xl rounded-br-md bg-primary px-3.5 py-2 text-primary-foreground'
                     : 'assistant self-start'
                 )}
               >

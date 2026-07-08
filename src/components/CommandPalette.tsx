@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { useVault } from '../lib/store';
 import { listChats } from '../lib/chat';
+import { getSettings } from '../lib/settings';
 
 interface Hit {
   path: string;
@@ -60,6 +61,10 @@ export function CommandPalette() {
 
   const hits = useMemo(() => search(records, query), [records, query]);
 
+  // A query queued by 'vault:search' (e.g. clicking a #tag) survives the
+  // open-reset below.
+  const pendingQuery = useRef<string | null>(null);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
@@ -67,13 +72,22 @@ export function CommandPalette() {
         setOpen((o) => !o);
       }
     };
+    const onSearch = (e: Event) => {
+      pendingQuery.current = String((e as CustomEvent).detail ?? '');
+      setOpen(true);
+    };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('vault:search', onSearch);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('vault:search', onSearch);
+    };
   }, []);
 
   useEffect(() => {
     if (open) {
-      setQuery('');
+      setQuery(pendingQuery.current ?? '');
+      pendingQuery.current = null;
       setSelected(0);
       setTimeout(() => inputRef.current?.focus(), 0);
     }
@@ -84,7 +98,7 @@ export function CommandPalette() {
   const pick = (hit: Hit) => {
     setOpen(false);
     if (hit.kind === 'chat') setActiveChat(hit.path);
-    else openFile(hit.path, 'read');
+    else openFile(hit.path, getSettings(records).defaultMode);
   };
 
   return (

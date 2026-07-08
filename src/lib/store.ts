@@ -10,6 +10,7 @@ interface VaultState {
   activePath: string | null; // file open in the editor
   activeChat: string | null; // chat folder open in the chat pane
   openTabs: string[]; // editor tab strip, in open order
+  splitPath: string | null; // note open in the secondary (right) pane
   railTab: 'files' | 'chats' | 'devices';
   mainView: 'chat' | 'note' | 'graph' | 'skills' | 'connectors' | 'automations' | 'plugins';
   editorMode: 'read' | 'edit';
@@ -32,6 +33,7 @@ interface VaultState {
   setEditorMode: (mode: 'read' | 'edit') => void;
   openFile: (path: string, mode?: 'read' | 'edit') => void;
   closeTab: (path: string) => void;
+  setSplitPath: (path: string | null) => void;
   updateStream: (chatPath: string, fn: (s: StreamState) => StreamState) => void;
   clearStream: (chatPath: string) => void;
   addApproval: (approval: ApprovalRequest) => void;
@@ -54,6 +56,7 @@ export const useVault = create<VaultState>((set) => ({
   activePath: null,
   activeChat: null,
   openTabs: [],
+  splitPath: null,
   railTab: 'files',
   mainView: 'chat',
   editorMode: 'read',
@@ -109,6 +112,8 @@ export const useVault = create<VaultState>((set) => ({
       const idx = Math.max(0, state.openTabs.indexOf(path) - 1);
       return { openTabs, activePath: openTabs[Math.min(idx, openTabs.length - 1)] };
     }),
+
+  setSplitPath: (splitPath) => set({ splitPath }),
 
   updateStream: (chatPath, fn) =>
     set((state) => {

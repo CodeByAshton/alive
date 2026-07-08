@@ -129,6 +129,43 @@
   background: color-mix(in oklab, var(--accent-color) 8%, transparent);
 }
 .markdown hr { @apply my-6 border-neutral-200; }
+/* ==highlights== */
+.markdown mark {
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 2px;
+  background: color-mix(in oklab, var(--accent-color) 22%, transparent);
+}
+/* #tags — quiet pills that search the vault on click */
+.markdown a.tag {
+  @apply rounded-full px-1.5 py-px text-[0.85em] font-medium no-underline transition-colors;
+  color: var(--color-neutral-500);
+  background: var(--color-neutral-100);
+}
+.markdown a.tag:hover {
+  color: var(--accent-color);
+  background: color-mix(in oklab, var(--accent-color) 10%, transparent);
+}
+/* Obsidian-style callouts: > [!note] Title */
+.markdown .callout {
+  --callout-color: var(--accent-color);
+  @apply my-3 rounded-xl px-4 py-3;
+  border-left: 3px solid var(--callout-color);
+  background: color-mix(in oklab, var(--callout-color) 6%, transparent);
+}
+.markdown .callout > :last-child { margin-bottom: 0; }
+.markdown .callout-title {
+  @apply mb-1 flex items-center gap-1.5 text-[13px] font-semibold;
+  color: var(--callout-color);
+}
+.markdown .callout-tip, .markdown .callout-hint { --callout-color: oklch(0.55 0.11 180); }
+.markdown .callout-success, .markdown .callout-check, .markdown .callout-done { --callout-color: oklch(0.55 0.12 155); }
+.markdown .callout-question, .markdown .callout-help, .markdown .callout-faq { --callout-color: oklch(0.6 0.12 85); }
+.markdown .callout-warning, .markdown .callout-caution, .markdown .callout-attention { --callout-color: oklch(0.62 0.14 60); }
+.markdown .callout-danger, .markdown .callout-error, .markdown .callout-failure, .markdown .callout-bug, .markdown .callout-important { --callout-color: oklch(0.55 0.19 25); }
+.markdown .callout-example { --callout-color: oklch(0.53 0.15 300); }
+.markdown .callout-quote, .markdown .callout-cite { --callout-color: var(--color-neutral-500); }
+.markdown .task-checkbox { cursor: pointer; }
 .markdown table { @apply my-3 w-full border-collapse text-[13.5px]; }
 .markdown th { @apply border-b-2 border-neutral-200 px-3 py-1.5 text-left font-semibold; }
 .markdown td { @apply border-b border-neutral-100 px-3 py-1.5; }
@@ -141,11 +178,13 @@
 .markdown-sm h3 { @apply mt-2 mb-1 text-sm; }
 .markdown-sm pre { @apply my-2 p-3 rounded-lg; }
 
-/* ── CodeMirror (edit mode) ───────────────────────────────────────────── */
+/* ── CodeMirror (edit mode) — live preview: markdown styles itself as you
+      type (headings big, bold bold, code mono), Notion/Obsidian-style. ── */
 .editor-cm .cm-editor { height: 100%; background: transparent; }
 .editor-cm .cm-editor.cm-focused { outline: none; }
 .editor-cm .cm-content {
-  @apply mx-auto max-w-[72ch] py-6 px-8 font-mono text-[13.5px] leading-[1.7] text-neutral-800;
+  @apply mx-auto py-6 px-8 font-sans text-[15px] leading-[1.65] text-neutral-800;
+  max-width: var(--content-width, 72ch);
   caret-color: var(--foreground);
   padding-bottom: 40vh;
 }

@@ -53,11 +53,10 @@ export function enabledPlugins(records: Map<string, VaultRecord>): Set<string> {
   return new Set(settings.plugins ?? PLUGINS.map((p) => p.id));
 }
 
-export async function setPluginEnabled(
-  records: Map<string, VaultRecord>,
-  id: string,
-  on: boolean
-): Promise<void> {
+// Reads the live store (not a caller-captured map) so rapid toggles can't
+// clobber each other's writes.
+export async function setPluginEnabled(id: string, on: boolean): Promise<void> {
+  const records = useVault.getState().records;
   const enabled = enabledPlugins(records);
   if (on) enabled.add(id);
   else enabled.delete(id);

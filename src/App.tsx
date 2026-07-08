@@ -50,7 +50,14 @@ function AppearanceManager() {
   const settings = useSettings();
   useEffect(() => {
     applyAppearance(settings);
-  }, [settings.theme, settings.accent, settings.uiScale, settings.reduceMotion, settings.highContrast]);
+  }, [
+    settings.theme,
+    settings.accent,
+    settings.uiScale,
+    settings.reduceMotion,
+    settings.highContrast,
+    settings.contentWidth,
+  ]);
   return null;
 }
 

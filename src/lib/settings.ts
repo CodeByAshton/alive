@@ -16,6 +16,8 @@ export interface AppSettings {
   uiScale: number; // percent
   reduceMotion: boolean;
   highContrast: boolean;
+  defaultMode: 'read' | 'edit'; // how notes open
+  contentWidth: 'normal' | 'wide';
   // Enabled plugin ids; null means "no explicit choice yet" (defaults apply).
   plugins: string[] | null;
   // Sidebar menu customization. Order is a preference list (registry items
@@ -27,10 +29,12 @@ export interface AppSettings {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   theme: 'light',
-  accent: 'indigo',
+  accent: 'mono',
   uiScale: 100,
   reduceMotion: false,
   highContrast: false,
+  defaultMode: 'read',
+  contentWidth: 'normal',
   plugins: null,
   menuOrder: null,
   menuHidden: [],
@@ -46,6 +50,8 @@ export function getSettings(records: Map<string, VaultRecord>): AppSettings {
     uiScale: typeof data.uiScale === 'number' ? data.uiScale : DEFAULT_SETTINGS.uiScale,
     reduceMotion: data.reduceMotion === true,
     highContrast: data.highContrast === true,
+    defaultMode: data.defaultMode === 'edit' ? 'edit' : 'read',
+    contentWidth: data.contentWidth === 'wide' ? 'wide' : 'normal',
     plugins: Array.isArray(data.plugins) ? data.plugins.map(String) : null,
     menuOrder: Array.isArray(data.menuOrder) ? data.menuOrder.map(String) : null,
     menuHidden: Array.isArray(data.menuHidden) ? data.menuHidden.map(String) : [],
@@ -63,6 +69,8 @@ export async function updateSettings(
     uiScale: next.uiScale,
     reduceMotion: next.reduceMotion,
     highContrast: next.highContrast,
+    defaultMode: next.defaultMode,
+    contentWidth: next.contentWidth,
   };
   if (next.plugins !== null) data.plugins = next.plugins;
   if (next.menuOrder !== null) data.menuOrder = next.menuOrder;
