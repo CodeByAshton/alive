@@ -24,7 +24,20 @@ const PORT = Number(process.env.PORT || 8787);
 // per-device permissions, and a kill switch before this touches the internet.
 const VAULT_KEY = process.env.VAULT_KEY || 'vault-dev-key';
 
-const store = new VaultStore(process.env.VAULT_DATA || path.join(__dirname, 'data', 'vault.json'));
+// Storage backend: Supabase Postgres when configured (state survives
+// redeploys), otherwise the local JSON file. Same interface either way.
+let store;
+if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY) {
+  const { SupabaseVaultStore } = await import('./store-supabase.mjs');
+  store = await new SupabaseVaultStore({
+    url: process.env.SUPABASE_URL,
+    serviceKey: process.env.SUPABASE_SERVICE_KEY,
+    vaultKey: VAULT_KEY,
+  }).init();
+  console.log('vault store: supabase postgres');
+} else {
+  store = new VaultStore(process.env.VAULT_DATA || path.join(__dirname, 'data', 'vault.json'));
+}
 seedVault(store);
 migrateVault(store);
 const presence = new PresenceRegistry();

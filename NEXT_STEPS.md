@@ -25,8 +25,14 @@ between this and something strangers can download and trust.
 - [ ] Rate limiting + input size caps on the WS API; authenticated CORS instead of `*`
 
 ## 3. Cloud backend for real multi-user use
-- [ ] Swap the JSON-file VaultStore for Postgres (or Supabase: Postgres + Realtime + Presence + Auth — the seams are `server/store.mjs` + `src/lib/sync.ts`)
-- [ ] Multi-vault / multi-user data model (vault_id on every record)
+- [x] Swap the JSON-file VaultStore for Supabase Postgres — `server/store-supabase.mjs`
+      (write-through mirror, hydrate on boot; enable with `SUPABASE_URL` + `SUPABASE_SERVICE_KEY`;
+      schema live on the project + in `supabase/migrations/`; verify with `npm run smoke:supabase`
+      from a network that can reach *.supabase.co — the dev sandbox can't)
+- [x] Multi-vault data model (`vaults` + `vault_id` on every record, keyed by hashed vault key);
+      multi-*user* accounts still open
+- [ ] Supabase Realtime/Presence/Auth to replace the WS server for serverless deploys
+      (single-writer server + WS remains the architecture until then)
 - [ ] Blob/attachment storage for non-Markdown files (images in notes)
 - [ ] Backups + export (zip of the vault = plain Markdown folder)
 - [ ] Deploy story: Fly/Railway/VPS container for the vault server + TLS; document `VAULT_REMOTE`

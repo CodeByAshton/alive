@@ -58,6 +58,11 @@ export OLLAMA_URL=http://localhost:11434   # local models (default shown)
 # No keys at all? Demo the entire harness with the built-in mock engine:
 export VAULT_ENABLE_MOCK=1
 
+# Optional: persist the vault in Supabase Postgres instead of a local JSON
+# file (state survives redeploys; schema in supabase/migrations/):
+export SUPABASE_URL=https://<project-ref>.supabase.co
+export SUPABASE_SERVICE_KEY=...     # service role key — server-side only, never ship to a client
+
 npm run dev     # cloud backend on :8787 + Vite on :5173
 ```
 
@@ -96,7 +101,7 @@ Production-ish: `npm run build && npm start` serves the built client and the API
 ```
 
 - **Engines are stateless and swappable; the harness is stateful and singular.** The harness owns the conversation (vault records), presence, and tool assembly; every engine gets the same neutral context (`system`, `messages`, `tools`, `executeTool`) — so swapping models mid-thread loses nothing. Adding a provider = implementing one engine (`server/engines/`).
-- **The cloud layer is a seam.** `server/store.mjs` + the WS protocol in `src/lib/sync.ts` play the Supabase role (Postgres/Realtime/Presence). Swapping in Supabase means replacing those two files; the record model (path, type, content, timestamps, rev) maps 1:1 to a table.
+- **The cloud layer is a seam.** `server/store.mjs` + the WS protocol in `src/lib/sync.ts` play the Supabase role (Postgres/Realtime/Presence). Persistence is already swappable: set `SUPABASE_URL` + `SUPABASE_SERVICE_KEY` and `server/store-supabase.mjs` mirrors the vault into Postgres (schema in `supabase/migrations/`); the record model maps 1:1 to the `vault_records` table. Realtime/Presence/Auth remain on the WS server for now.
 - **Voice** is Web Speech API behind a `VoiceEngine` interface (`src/lib/voice.ts`) — swap for Deepgram/realtime later. Voice-initiated, screen-confirmed: speak on the phone, watch edits land on the desktop.
 - **Sync** is last-write-wins per record with a monotonic rev cursor, tombstoned deletes, and a durable offline outbox on each client.
 
