@@ -19,6 +19,41 @@ function check(name, ok, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`);
 }
 
+// --- Reset: make reruns deterministic --------------------------------------
+// The suite mutates the vault (notes, chats, connectors, modes, the kill
+// switch). Sweep its leavings from any previous run so back-to-back runs
+// against the same dev server pass identically.
+async function resetVault() {
+  const { default: RawWS } = await import('ws');
+  const ws = new RawWS('ws://localhost:8787/ws?key=vault-dev-key&deviceId=e2e-reset&deviceType=desktop');
+  await new Promise((resolve, reject) => {
+    ws.on('open', resolve);
+    ws.on('error', reject);
+  });
+  const paths = await new Promise((resolve) => {
+    ws.on('message', (raw) => {
+      const msg = JSON.parse(raw.toString());
+      if (msg.type === 'records') resolve(msg.records.filter((r) => !r.deleted).map((r) => r.path));
+    });
+    ws.send(JSON.stringify({ type: 'sync', since: 0 }));
+  });
+  const leftover = (p) =>
+    /^chats\/.+/.test(p) ||
+    /^notes\/(Sync Test|Device Probe|Conflict)/.test(p) ||
+    p.startsWith('.vault/connectors/') ||
+    p.startsWith('.vault/automations/') ||
+    p.startsWith('.vault/memory/') ||
+    p === '.vault/notifications.md';
+  for (const p of paths.filter(leftover)) {
+    ws.send(JSON.stringify({ type: 'delete', path: p, mtime: Date.now() }));
+  }
+  ws.send(JSON.stringify({ type: 'set_paused', paused: false }));
+  ws.send(JSON.stringify({ type: 'set_mode', mode: 'ask' }));
+  await new Promise((r) => setTimeout(r, 500));
+  ws.close();
+}
+await resetVault();
+
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
 
 // --- Device 1: desktop ---
@@ -260,7 +295,7 @@ await phone.waitForTimeout(800);
 await desktop2.locator('.nav-item[title="Customize"]').hover();
 await desktop2.locator('.customize-menu [role="menuitem"]', { hasText: 'Connectors' }).click();
 await desktop2.waitForSelector('.connectors-view', { timeout: 5000 });
-await desktop2.locator('.connectors-view button', { hasText: 'New' }).click();
+await desktop2.locator('.connectors-view header button', { hasText: 'New' }).click();
 // The gallery opens Claude-style; pick "Custom" for the local mock server.
 await desktop2.waitForSelector('.connector-gallery', { timeout: 3000 });
 const galleryText = await desktop2.locator('.connector-gallery').innerText();

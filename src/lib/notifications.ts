@@ -139,11 +139,16 @@ export function initNotifications(): void {
   // bookkeeping bumps last_run) and when the app comes back to foreground.
   let timer: ReturnType<typeof setTimeout> | undefined;
   let lastSnapshot = '';
+  let lastRecords: unknown = null;
   const remirror = () => {
     clearTimeout(timer);
     timer = setTimeout(() => mirrorSchedules(), 1500);
   };
   useVault.subscribe((state) => {
+    // The store fires on every state change (stream deltas included); the
+    // records map is only ever *replaced*, so a reference check gates the scan.
+    if (state.records === lastRecords) return;
+    lastRecords = state.records;
     const snapshot = [...state.records.keys()]
       .filter((p) => p.startsWith('.vault/automations/'))
       .map((p) => `${p}@${state.records.get(p)!.rev}`)

@@ -175,6 +175,15 @@ try {
   check('notification persists to .vault/notifications.md', (records.get('.vault/notifications.md')?.content ?? '').includes('ping!'));
   check('run bookkeeping written back to the file', /last_run/.test(records.get(duePath)?.content ?? '') && /last_result: ok/.test(records.get(duePath)?.content ?? ''));
 
+  // 3b. Wire paths are constrained: run-now and prompt-window edits can only
+  // touch .vault/automations/ — never clobber an ordinary note.
+  send({ type: 'automation_run', path: 'Welcome.md' });
+  const runErr = await waitFor((m) => m.type === 'error' && /Not an automation path/.test(m.error ?? ''));
+  check('automation_run refuses non-automation paths', Boolean(runErr) && !/schedule:/.test(records.get('Welcome.md')?.content ?? ''));
+  send({ type: 'automation_edit', requestId: 'e3', path: '.vault/AGENT.md', instruction: 'x', provider: 'mock', model: 'mock-1' });
+  const edited3 = await waitFor((m) => m.type === 'automation_edited' && m.requestId === 'e3');
+  check('automation_edit refuses non-automation paths', edited3?.ok === false && /Not an automation path/.test(edited3?.error ?? ''));
+
   // Turns are matched against a fresh inbox each time — turn_done from an
   // earlier turn must not satisfy a later wait.
   const turn = (text) => {

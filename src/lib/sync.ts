@@ -261,7 +261,9 @@ export function runAutomationNow(path: string): void {
 }
 
 export function dismissAutomationProposal(name: string): void {
-  send({ type: 'automation_dismiss', name });
+  // Queued when offline — a dismissal the reflection process never learns
+  // about would come back as the same proposal.
+  sendOrQueue({ type: 'automation_dismiss', name });
 }
 
 export function requestReflection(): void {

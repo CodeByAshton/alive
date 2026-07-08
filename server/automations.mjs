@@ -68,6 +68,23 @@ export function listAutomations(store) {
     .map(parseAutomation);
 }
 
+// Paths arriving over the wire (run-now, prompt-window edits) must name a
+// real automation file — never a route to overwrite arbitrary vault records.
+export function assertAutomationPath(p) {
+  const clean = String(p || '')
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+    .replace(/\/+/g, '/');
+  if (
+    clean.split('/').some((seg) => seg === '..' || seg === '.') ||
+    !clean.startsWith(AUTOMATIONS_DIR + '/') ||
+    !clean.endsWith('.md')
+  ) {
+    throw new Error(`Not an automation path: ${p}`);
+  }
+  return clean;
+}
+
 export function automationPathFor(store, name) {
   const slug = String(name || 'automation')
     .toLowerCase()
@@ -183,6 +200,7 @@ function vaultTimezone(store) {
 }
 
 export async function runAutomation(ctx, path, { manual = false } = {}) {
+  path = assertAutomationPath(path);
   const rec = ctx.store.get(path);
   if (!rec) throw new Error(`No automation at ${path}`);
   const automation = parseAutomation(rec);
@@ -263,6 +281,7 @@ The script runs on a schedule with NO model involved. Available API (top-level a
 Keep scripts short and deterministic. For a plain reminder, one notify() call is the whole script.`;
 
 export async function editAutomationWithModel({ ctx, path, instruction, provider, model }) {
+  if (path) path = assertAutomationPath(path);
   const existing = path ? ctx.store.get(path) : null;
   const system = `You are the automation editor for Vault. You output a complete automation file and nothing else — no commentary, no surrounding code fence.
 
