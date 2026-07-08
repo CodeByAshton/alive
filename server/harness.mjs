@@ -7,6 +7,15 @@ import { parseFrontmatter, serializeFrontmatter } from '../shared/frontmatter.mj
 import { getEngine } from './engines/index.mjs';
 import { connectorToolDefs, executeConnectorTool, isConnectorTool } from './connectors.mjs';
 import { fetchUrl } from './web.mjs';
+import {
+  AUTOMATIONS_DIR,
+  automationPathFor,
+  listAutomations,
+  parseAutomation,
+  serializeAutomation,
+  validateAutomation,
+} from './automations.mjs';
+import { appendMemory, MEMORY_FILE } from './reflection.mjs';
 
 const SYSTEM_PROMPT = `You are the resident assistant of Vault — a personal knowledge workspace where everything is a Markdown file in a folder tree, notes link to each other with [[wikilinks]], and your conversations with the user are themselves folders of Markdown files in the same vault.
 
@@ -14,7 +23,11 @@ You may have tools for reading and editing the vault. Use whatever tools are cur
 
 When you edit the vault, narrate briefly what you're doing as you work (one short sentence per action), because the user may be listening rather than watching. Use [[wikilinks]] when referring to notes. Prefer creating notes under an appropriate existing folder. Keep responses concise.
 
-System files live under .vault/ (hidden from the user's file tree): your standing instructions are .vault/AGENT.md — when the user asks you to change how you behave going forward, update that file. Skills live under .vault/skills/. Do not create ordinary notes inside .vault/.`;
+System files live under .vault/ (hidden from the user's file tree): your standing instructions are .vault/AGENT.md — when the user asks you to change how you behave going forward, update that file. Skills live under .vault/skills/. Do not create ordinary notes inside .vault/.
+
+Memory: durable facts about the user (preferences, recurring context, standing situations) belong in your memory file — use the save_memory tool when you learn something worth keeping. It is a visible note the user can edit; never store secrets or transient details.
+
+Automations: recurring work that a plain script can do — reminders above all — should be handed off to an automation instead of you. Automations run on a schedule with no model involved and live under Customize → Automations. When the user asks to be reminded of something, or asks for the same scriptable thing repeatedly, offer to set up an automation and use the save_automation tool (the user confirms it on-screen before it saves). Do not write automation files with the note tools.`;
 
 const VAULT_TOOLS = [
   {
@@ -89,6 +102,37 @@ const VAULT_TOOLS = [
     capability: 'read',
   },
   {
+    name: 'save_memory',
+    description:
+      'Remember a durable fact about the user (a preference, recurring context, how they like things done). Appends to your visible memory note, which you see every turn. Not for transient details or secrets.',
+    input_schema: { type: 'object', properties: { note: { type: 'string', description: 'One concise sentence.' } }, required: ['note'] },
+    capability: 'write',
+  },
+  {
+    name: 'list_automations',
+    description: 'List the automations set up in this vault (name, schedule, status).',
+    input_schema: { type: 'object', properties: {} },
+    capability: 'read',
+  },
+  {
+    name: 'save_automation',
+    description:
+      'Create or update an automation — a script that runs on a schedule with no model involved (reminders, recurring vault chores). The user approves it on-screen before it saves. Script API: notify(message) notifies the user on all devices; vault.read/list/write/append work on notes; fetchUrl(url) reads a public page; log(msg) records debug output. For a plain reminder the whole script is one notify() call.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Existing automation path to update; omit to create a new one.' },
+        name: { type: 'string' },
+        description: { type: 'string', description: 'One-line summary.' },
+        schedule: { type: 'string', description: 'e.g. "daily 09:00", "weekdays 08:30", "weekly mon 18:00", "every 30 minutes", "once 2026-07-09 14:00"' },
+        about: { type: 'string', description: 'One plain-language paragraph the user reads explaining what this does and when.' },
+        script: { type: 'string', description: 'The JavaScript body. For a reminder: notify("...")' },
+      },
+      required: ['name', 'description', 'schedule', 'about', 'script'],
+    },
+    capability: 'write',
+  },
+  {
     name: 'run_command',
     description:
       "Run a shell command in the user's active workspace on their computer. Use it for coding tasks: git, builds, tests, inspecting files outside the vault, or invoking installed CLIs (e.g. claude, codex, npm, python). Returns stdout+stderr, truncated.",
@@ -128,9 +172,58 @@ export function assembleTools(presence) {
   return VAULT_TOOLS.filter((t) => capabilities.has(t.capability)).map(({ capability, ...t }) => t);
 }
 
-function makeToolExecutor(store, execRemote) {
+function makeToolExecutor(store, execRemote, { approveAutomation } = {}) {
+  // Writes into the automations folder must go through save_automation so the
+  // approval card can't be sidestepped with the plain note tools.
+  const guardAutomationPath = (p) => {
+    if (sanitizePath(p).startsWith(AUTOMATIONS_DIR)) {
+      throw new Error(`Files under ${AUTOMATIONS_DIR}/ are managed automations — use the save_automation tool instead.`);
+    }
+  };
   return async function executeTool(name, input) {
     switch (name) {
+      case 'save_memory': {
+        const note = String(input.note || '').trim();
+        if (!note) throw new Error('Nothing to remember.');
+        appendMemory(store, note.slice(0, 500));
+        return `Remembered (saved to ${MEMORY_FILE}).`;
+      }
+      case 'list_automations': {
+        const rows = listAutomations(store).map(
+          (a) => `${a.path} — "${a.name}" (${a.schedule}) [${a.status}${a.enabled ? '' : ', off'}]${a.lastRun ? ` last ran ${a.lastRun}` : ''}`
+        );
+        return rows.length ? rows.join('\n') : '(no automations yet)';
+      }
+      case 'save_automation': {
+        const invalid = validateAutomation(input);
+        if (invalid) throw new Error(invalid);
+        if (approveAutomation) {
+          const ok = await approveAutomation({ name: input.name, schedule: input.schedule, script: input.script });
+          if (!ok) throw new Error('The user declined to save that automation.');
+        }
+        const path = input.path ? sanitizePath(input.path) : automationPathFor(store, input.name);
+        if (input.path && !path.startsWith(AUTOMATIONS_DIR)) {
+          throw new Error(`Automations live under ${AUTOMATIONS_DIR}/.`);
+        }
+        const prior = input.path && store.get(path) ? parseAutomation(store.get(path)) : null;
+        store.put({
+          path,
+          type: 'file',
+          content: serializeAutomation({
+            name: String(input.name),
+            description: String(input.description || ''),
+            schedule: String(input.schedule),
+            about: String(input.about || input.description || ''),
+            script: String(input.script),
+            enabled: true,
+            status: 'active',
+            createdBy: prior?.createdBy ?? 'assistant',
+            lastRun: prior?.lastRun ?? null,
+            lastResult: prior?.lastResult ?? null,
+          }),
+        });
+        return `Saved automation ${path} — it will run "${input.schedule}" with no model involved. The user can see and edit it under Customize → Automations.`;
+      }
       case 'run_command': {
         // Executed on a connected node (the companion harness on the user's
         // computer), not on this server.
@@ -158,11 +251,13 @@ function makeToolExecutor(store, execRemote) {
       case 'create_note':
       case 'edit_note': {
         const path = sanitizePath(input.path);
+        guardAutomationPath(path);
         store.put({ path, type: 'file', content: String(input.content ?? '') });
         return `Saved ${path}`;
       }
       case 'append_note': {
         const path = sanitizePath(input.path);
+        guardAutomationPath(path);
         const existing = store.get(path);
         const content = existing ? existing.content.replace(/\n?$/, '\n') + String(input.content ?? '') : String(input.content ?? '');
         store.put({ path, type: 'file', content });
@@ -176,6 +271,7 @@ function makeToolExecutor(store, execRemote) {
       case 'move_path': {
         const from = sanitizePath(input.from);
         const to = sanitizePath(input.to);
+        guardAutomationPath(to);
         const changed = store.move(from, to);
         if (!changed.length) throw new Error(`Nothing at ${from}`);
         return `Moved ${from} -> ${to}`;
@@ -285,7 +381,7 @@ function vaultOutline(store) {
   return shown.join('\n');
 }
 
-export async function runTurn({ store, presence, chatPath, text, deviceType, provider, model, broadcast, execRemote, approveConnector }) {
+export async function runTurn({ store, presence, chatPath, text, deviceType, provider, model, broadcast, execRemote, approveConnector, approveAutomation }) {
   chatPath = sanitizePath(chatPath);
   const timestamp = new Date().toISOString();
 
@@ -321,6 +417,13 @@ export async function runTurn({ store, presence, chatPath, text, deviceType, pro
     system += `\n\nStanding instructions from ${AGENT_FILE} (set by the user; follow them):\n${agentFile.content.slice(0, 6000)}`;
   }
 
+  // Learned memory rides along on every turn — the durable half of "custom
+  // learning" (the other half is automations, which run without a model).
+  const memoryFile = store.get(MEMORY_FILE);
+  if (memoryFile?.content.trim()) {
+    system += `\n\nYour memory of this user (${MEMORY_FILE} — kept via save_memory and nightly reflection):\n${memoryFile.content.slice(-4000)}`;
+  }
+
   // Files the user referenced in this message ride along as context.
   const referenced = collectReferencedFiles(store, text);
   if (referenced.length) {
@@ -339,7 +442,7 @@ export async function runTurn({ store, presence, chatPath, text, deviceType, pro
   // Track vault files this turn touched so clients can show them as
   // attachments on the assistant's message.
   const filesTouched = [];
-  const baseExecutor = makeToolExecutor(store, execRemote);
+  const baseExecutor = makeToolExecutor(store, execRemote, { approveAutomation });
   const trackingExecutor = async (name, input) => {
     if (isConnectorTool(name)) return executeConnectorTool(store, name, input, approveConnector);
     const result = await baseExecutor(name, input);

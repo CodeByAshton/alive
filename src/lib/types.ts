@@ -56,5 +56,13 @@ export interface ApprovalRequest {
   chatPath: string;
   command: string;
   cwd: string | null;
-  kind: 'command' | 'connector';
+  kind: 'command' | 'connector' | 'automation';
+}
+
+// A live notification (automation firing, reflection suggestion) shown as a
+// transient toast; the durable copy lives in .vault/notifications.md.
+export interface Notice {
+  id: string;
+  title: string;
+  message: string;
 }

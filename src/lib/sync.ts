@@ -85,8 +85,17 @@ async function connect() {
           chatPath: msg.chatPath,
           command: msg.command,
           cwd: msg.cwd ?? null,
-          kind: msg.kind === 'connector' ? 'connector' : 'command',
+          kind: msg.kind === 'connector' || msg.kind === 'automation' ? msg.kind : 'command',
         });
+        break;
+      case 'notify': {
+        const id = `notice-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        state.addNotice({ id, title: String(msg.title ?? ''), message: String(msg.message ?? '') });
+        setTimeout(() => useVault.getState().removeNotice(id), 8000);
+        break;
+      }
+      case 'automation_edited':
+        resolveAutomationEdit(msg);
         break;
       case 'approval_resolved':
         state.removeApproval(msg.id);
@@ -208,6 +217,52 @@ export function setAssistantPaused(paused: boolean): void {
 export function setAssistantMode(mode: AssistantMode): void {
   useVault.getState().setMode(mode); // optimistic; server echoes
   send({ type: 'set_mode', mode });
+}
+
+// ---- automations ----
+
+// The Automations view's prompt window: describe the automation (or a change
+// to it) in plain language; the server runs one focused model call and writes
+// the file. Resolution arrives as a broadcast keyed by requestId.
+const pendingEdits = new Map<string, { resolve: (path: string) => void; reject: (err: Error) => void }>();
+
+export function editAutomation(
+  path: string | null,
+  instruction: string,
+  provider: string,
+  model: string
+): Promise<string> {
+  const requestId = `edit-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  return new Promise((resolve, reject) => {
+    if (!send({ type: 'automation_edit', requestId, path, instruction, provider, model })) {
+      reject(new Error('Not connected — try again in a moment.'));
+      return;
+    }
+    pendingEdits.set(requestId, { resolve, reject });
+    setTimeout(() => {
+      if (pendingEdits.delete(requestId)) reject(new Error('The edit timed out. Try again.'));
+    }, 120_000);
+  });
+}
+
+function resolveAutomationEdit(msg: { requestId?: string; ok?: boolean; path?: string; error?: string }) {
+  const pending = pendingEdits.get(String(msg.requestId));
+  if (!pending) return;
+  pendingEdits.delete(String(msg.requestId));
+  if (msg.ok && msg.path) pending.resolve(msg.path);
+  else pending.reject(new Error(msg.error || 'The edit failed.'));
+}
+
+export function runAutomationNow(path: string): void {
+  send({ type: 'automation_run', path });
+}
+
+export function dismissAutomationProposal(name: string): void {
+  send({ type: 'automation_dismiss', name });
+}
+
+export function requestReflection(): void {
+  send({ type: 'reflect_now' });
 }
 
 // Voice (TTS) hook — the phone surface subscribes to completed turns.

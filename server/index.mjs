@@ -24,6 +24,8 @@ import { connectorStatus } from './connectors.mjs';
 import { buildZip } from './zip.mjs';
 import { verifySupabaseToken } from './auth.mjs';
 import { completeFlow, disconnect, startFlow } from './oauth.mjs';
+import { editAutomationWithModel, runAutomation, startAutomationScheduler } from './automations.mjs';
+import { maybeReflect, recordDismissal, runReflection } from './reflection.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 8787);
@@ -101,6 +103,9 @@ function getContext(vaultId, ownerId = null) {
         };
         store.on('change', (records) => ctx.broadcast({ type: 'change', records }));
         ctx.presence.on('update', (devices) => ctx.broadcast({ type: 'presence', devices }));
+        // The non-model executor: fires due automations, and once a day gives
+        // the reflection pass a chance to learn from recent chats.
+        startAutomationScheduler(ctx, { onTick: () => maybeReflect(ctx) });
         return ctx;
       })()
     );
@@ -434,6 +439,38 @@ wss.on('connection', async (ws, req) => {
         case 'set_mode':
           setAssistantMode(ctx, String(msg.mode));
           break;
+        // Automations view: prompt-window editing (a user-initiated model
+        // call that rewrites one automation file), run-now, dismissal
+        // bookkeeping, and manual reflection.
+        case 'automation_edit': {
+          const requestId = String(msg.requestId ?? '');
+          try {
+            const { path } = await editAutomationWithModel({
+              ctx,
+              path: msg.path ? String(msg.path) : null,
+              instruction: String(msg.instruction ?? '').slice(0, MAX_TURN_TEXT),
+              provider: msg.provider || 'anthropic',
+              model: msg.model || 'claude-opus-4-8',
+            });
+            ctx.broadcast({ type: 'automation_edited', requestId, ok: true, path });
+          } catch (err) {
+            ctx.broadcast({ type: 'automation_edited', requestId, ok: false, error: err.message });
+          }
+          break;
+        }
+        case 'automation_run':
+          await runAutomation(ctx, String(msg.path ?? ''), { manual: true }).catch((err) =>
+            ws.send(JSON.stringify({ type: 'error', error: err.message }))
+          );
+          break;
+        case 'automation_dismiss':
+          recordDismissal(store, String(msg.name ?? ''));
+          break;
+        case 'reflect_now': {
+          const result = await runReflection(ctx).catch((err) => ({ skipped: err.message }));
+          ctx.broadcast({ type: 'reflect_done', ...result });
+          break;
+        }
         case 'tool_exec_result': {
           const pending = ctx.pendingExec.get(msg.id);
           if (pending) {
@@ -486,6 +523,17 @@ wss.on('connection', async (ws, req) => {
                   chatPath: msg.chatPath,
                   kind: 'connector',
                   command: `${connectorName}: ${toolName}`,
+                });
+              },
+              // Saving an automation is a standing change (it will keep
+              // acting later, unattended) — always screen-confirmed unless
+              // the vault-wide Auto mode trusts everything.
+              approveAutomation: async ({ name, schedule }) => {
+                if (ctx.mode === 'auto') return true;
+                return requestApproval(ctx, {
+                  chatPath: msg.chatPath,
+                  kind: 'automation',
+                  command: `${name} — ${schedule}`,
                 });
               },
             });

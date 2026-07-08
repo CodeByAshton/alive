@@ -95,6 +95,57 @@ function createMockEngine() {
         return text;
       };
 
+      // Automation editor calls (the Automations view's prompt window):
+      // deterministically turn "remind me to X (daily) at HH:MM" into a file.
+      if ((system || '').includes('automation editor for Vault')) {
+        const time = last.match(/at (\d{1,2}):(\d{2})/);
+        const hhmm = time ? `${time[1].padStart(2, '0')}:${time[2]}` : '09:00';
+        const what = (last.match(/remind me to ([^.,\n]+)/i)?.[1] ?? last)
+          .replace(/ at \d{1,2}:\d{2}.*$/, '')
+          .trim()
+          .slice(0, 60);
+        const name = what.charAt(0).toUpperCase() + what.slice(1);
+        const text = [
+          '---',
+          `name: ${JSON.stringify(name)}`,
+          `description: ${JSON.stringify(`Reminds you to ${what}.`)}`,
+          `schedule: daily ${hhmm}`,
+          'enabled: true',
+          'status: active',
+          'created_by: user',
+          '---',
+          '',
+          `Every day at ${hhmm}, this sends you a reminder to ${what}.`,
+          '',
+          '```js',
+          `notify(${JSON.stringify(`Reminder: ${what}`)});`,
+          '```',
+        ].join('\n');
+        return { text, toolsUsed };
+      }
+
+      // Reflection calls: propose an automation for any "remind me to X"
+      // intent that appears 2+ times in the recent transcript.
+      if ((system || '').includes('reflection process of Vault')) {
+        const counts = new Map();
+        for (const m of last.matchAll(/remind me to ([^.,\n\]]+)/gi)) {
+          const key = m[1].trim().toLowerCase();
+          counts.set(key, (counts.get(key) || 0) + 1);
+        }
+        const repeated = [...counts.entries()].filter(([, n]) => n >= 2).map(([k]) => k);
+        const payload = {
+          observations: repeated.map((w) => `User repeatedly asks to be reminded to ${w}.`),
+          automations: repeated.map((w) => ({
+            name: `Remind: ${w}`,
+            description: `Reminds you to ${w}.`,
+            schedule: 'daily 09:00',
+            about: `Every day at 09:00, this sends you a reminder to ${w}.`,
+            script: `notify(${JSON.stringify(`Reminder: ${w}`)});`,
+          })),
+        };
+        return { text: JSON.stringify(payload), toolsUsed };
+      }
+
       // Diagnostics: prove the harness wires skills/instructions into the
       // turn without needing a real model.
       if (/^\//.test(last.trim())) {
@@ -111,8 +162,44 @@ function createMockEngine() {
         const text = await say(`agent-file: ${has ? 'yes' : 'no'}`);
         return { text, toolsUsed };
       }
+      if (/^diagnostic: memory/i.test(last.trim())) {
+        const idx = (system || '').indexOf('Your memory of this user');
+        const text = await say(`memory: ${idx === -1 ? 'no' : (system || '').slice(idx, idx + 600).replace(/\n/g, ' ')}`);
+        return { text, toolsUsed };
+      }
 
       // Deterministic behaviors so tests can exercise the tool loop.
+      const automateMatch = last.match(/^automate[:,]? (.+)$/i);
+      const rememberMatch = last.match(/^remember[:,]? (.+)$/i);
+      if (rememberMatch && tools.some((t) => t.name === 'save_memory')) {
+        onEvent({ type: 'tool_start', name: 'save_memory', input: { note: rememberMatch[1] } });
+        toolsUsed.push('save_memory');
+        await executeTool('save_memory', { note: rememberMatch[1] });
+        onEvent({ type: 'tool_result', name: 'save_memory', ok: true });
+        return { text: await say(`Got it — I'll remember that.`), toolsUsed };
+      }
+      if (automateMatch && tools.some((t) => t.name === 'save_automation')) {
+        const time = automateMatch[1].match(/at (\d{1,2}):(\d{2})/);
+        const hhmm = time ? `${time[1].padStart(2, '0')}:${time[2]}` : '09:00';
+        const what = automateMatch[1].replace(/ at \d{1,2}:\d{2}.*$/, '').trim();
+        const input = {
+          name: what.charAt(0).toUpperCase() + what.slice(1),
+          description: `Reminds you to ${what}.`,
+          schedule: `daily ${hhmm}`,
+          about: `Every day at ${hhmm}, this sends you a reminder to ${what}.`,
+          script: `notify(${JSON.stringify(`Reminder: ${what}`)});`,
+        };
+        onEvent({ type: 'tool_start', name: 'save_automation', input });
+        toolsUsed.push('save_automation');
+        try {
+          await executeTool('save_automation', input);
+          onEvent({ type: 'tool_result', name: 'save_automation', ok: true });
+          return { text: await say(`Done — that's now a standing automation (daily ${hhmm}).`), toolsUsed };
+        } catch (err) {
+          onEvent({ type: 'tool_result', name: 'save_automation', ok: false });
+          return { text: await say(`No automation saved: ${err.message}`), toolsUsed };
+        }
+      }
       const noteMatch = last.match(/create (?:a )?note (?:called |named )?["']?([\w./ -]+?)["']?(?: with content ["'](.+?)["'])?$/i);
       const cmdMatch = last.match(/run (?:the )?command[: ]+(.+)$/i);
       const fetchMatch = last.match(/fetch (https?:\/\/\S+)/i);

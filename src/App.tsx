@@ -13,6 +13,7 @@ import { Phone } from './components/Phone';
 import { Connect } from './components/Connect';
 import { SkillsView } from './components/SkillsView';
 import { ConnectorsView } from './components/ConnectorsView';
+import { AutomationsView } from './components/AutomationsView';
 import { CommandPalette } from './components/CommandPalette';
 
 function useSize<T extends HTMLElement>() {
@@ -38,6 +39,32 @@ function GraphView() {
   );
 }
 
+// Live notifications from automations and reflection — transient toasts on
+// every surface; the durable copy is the .vault/notifications.md note.
+function Notices() {
+  const notices = useVault((s) => s.notices);
+  const removeNotice = useVault((s) => s.removeNotice);
+  if (!notices.length) return null;
+  return (
+    <div
+      className="notices pointer-events-none fixed right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2"
+      style={{ bottom: 'calc(16px + env(safe-area-inset-bottom))' }}
+    >
+      {notices.map((n) => (
+        <button
+          key={n.id}
+          className="notice pointer-events-auto cursor-pointer rounded-2xl border bg-white p-3.5 text-left shadow-md animate-in fade-in-0 slide-in-from-bottom-2"
+          onClick={() => removeNotice(n.id)}
+          title="Dismiss"
+        >
+          <span className="block text-[12px] font-semibold text-neutral-900">{n.title}</span>
+          <span className="mt-0.5 block text-[12.5px] leading-snug text-neutral-600">{n.message}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // One full-screen view at a time beside the sidebar: the chat, an open note,
 // or the graph.
 function Desktop() {
@@ -53,6 +80,7 @@ function Desktop() {
           {mainView === 'graph' && <GraphView />}
           {mainView === 'skills' && <SkillsView />}
           {mainView === 'connectors' && <ConnectorsView />}
+          {mainView === 'automations' && <AutomationsView />}
         </section>
       </main>
       <CommandPalette />
@@ -93,5 +121,10 @@ export default function App() {
     );
   if (auth === 'loading' || !hydrated)
     return <div className="boot grid h-full place-items-center text-sm text-neutral-400">Opening vault…</div>;
-  return surface === 'phone' ? <Phone /> : <Desktop />;
+  return (
+    <>
+      {surface === 'phone' ? <Phone /> : <Desktop />}
+      <Notices />
+    </>
+  );
 }

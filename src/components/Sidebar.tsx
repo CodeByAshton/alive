@@ -16,6 +16,7 @@ import {
   PencilLine,
   Plus,
   SquarePen,
+  Bot,
   Cable,
   SlidersHorizontal,
   Trash2,
@@ -312,7 +313,7 @@ function CustomizeItem({ className }: { className: (active: boolean) => string }
       <DropdownMenuTrigger asChild>
         <button
           title="Customize"
-          className={className(mainView === 'skills' || mainView === 'connectors')}
+          className={className(mainView === 'skills' || mainView === 'connectors' || mainView === 'automations')}
           onMouseEnter={openNow}
           onMouseLeave={closeSoon}
         >
@@ -331,6 +332,9 @@ function CustomizeItem({ className }: { className: (active: boolean) => string }
       >
         <DropdownMenuItem onClick={() => setMainView('skills')}>
           <Zap /> Skills
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setMainView('automations')}>
+          <Bot /> Automations
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => setMainView('connectors')}>
           <Cable /> Connectors

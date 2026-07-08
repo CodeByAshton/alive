@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { ApprovalRequest, AssistantMode, Device, Provider, StreamState, VaultRecord } from './types';
+import type { ApprovalRequest, AssistantMode, Device, Notice, Provider, StreamState, VaultRecord } from './types';
 
 interface VaultState {
   records: Map<string, VaultRecord>;
@@ -10,10 +10,11 @@ interface VaultState {
   activePath: string | null; // file open in the editor
   activeChat: string | null; // chat folder open in the chat pane
   railTab: 'files' | 'chats' | 'devices';
-  mainView: 'chat' | 'note' | 'graph' | 'skills' | 'connectors';
+  mainView: 'chat' | 'note' | 'graph' | 'skills' | 'connectors' | 'automations';
   editorMode: 'read' | 'edit';
   streams: Map<string, StreamState>;
   approvals: ApprovalRequest[];
+  notices: Notice[];
   paused: boolean;
   mode: AssistantMode;
   pendingWrites: number; // offline outbox depth
@@ -26,13 +27,15 @@ interface VaultState {
   setActivePath: (path: string | null) => void;
   setActiveChat: (path: string | null) => void;
   setRailTab: (tab: 'files' | 'chats' | 'devices') => void;
-  setMainView: (view: 'chat' | 'note' | 'graph' | 'skills' | 'connectors') => void;
+  setMainView: (view: 'chat' | 'note' | 'graph' | 'skills' | 'connectors' | 'automations') => void;
   setEditorMode: (mode: 'read' | 'edit') => void;
   openFile: (path: string, mode?: 'read' | 'edit') => void;
   updateStream: (chatPath: string, fn: (s: StreamState) => StreamState) => void;
   clearStream: (chatPath: string) => void;
   addApproval: (approval: ApprovalRequest) => void;
   removeApproval: (id: string) => void;
+  addNotice: (notice: Notice) => void;
+  removeNotice: (id: string) => void;
   setPaused: (paused: boolean) => void;
   setMode: (mode: AssistantMode) => void;
   setPendingWrites: (n: number) => void;
@@ -53,6 +56,7 @@ export const useVault = create<VaultState>((set) => ({
   editorMode: 'read',
   streams: new Map(),
   approvals: [],
+  notices: [],
   paused: false,
   mode: 'ask',
   pendingWrites: 0,
@@ -99,6 +103,8 @@ export const useVault = create<VaultState>((set) => ({
   addApproval: (approval) =>
     set((state) => ({ approvals: [...state.approvals.filter((a) => a.id !== approval.id), approval] })),
   removeApproval: (id) => set((state) => ({ approvals: state.approvals.filter((a) => a.id !== id) })),
+  addNotice: (notice) => set((state) => ({ notices: [...state.notices.slice(-3), notice] })),
+  removeNotice: (id) => set((state) => ({ notices: state.notices.filter((n) => n.id !== id) })),
   setPaused: (paused) => set({ paused }),
   setMode: (mode) => set({ mode }),
   setPendingWrites: (pendingWrites) => set({ pendingWrites }),

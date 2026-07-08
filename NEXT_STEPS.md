@@ -2,7 +2,22 @@
 
 Working checklist for upcoming sessions. State of the world: the prototype is feature-complete and
 covered by `npm run e2e` (39 checks, keyless via the mock engine) plus `npm run test:auth`
-(11 offline accounts-mode checks) and `npm run test:oauth` (8 offline connector-OAuth checks).
+(11 offline accounts-mode checks), `npm run test:oauth` (8 offline connector-OAuth checks), and
+`npm run test:automations` (23 offline custom-learning checks: scheduler, sandbox, memory, reflection).
+
+## Custom learning — shipped, follow-ups
+
+Automations (non-model scheduler + script sandbox), memory, and daily reflection are in
+(see README "Custom learning"). Deliberately deferred:
+
+- [ ] Delivery when no device is connected: notifications persist to `.vault/notifications.md` and
+      toast on connected surfaces, but there's no push yet — wire Capacitor local/push notifications
+      (iOS) and Web Push (browser) so a reminder lands on a pocketed phone
+- [ ] Timezone UI: scheduler honors `.vault/settings.json` `timezone` / `VAULT_TIMEZONE`; add a
+      Settings picker so users don't edit JSON
+- [ ] Trust boundary marker: automation scripts run in a node:vm sandbox with op/time caps — fine
+      for self-host/prototype; a hosted multi-tenant deploy should move them to isolated workers
+- [ ] Phase 3 (voice identity: wake word + on-device speaker verification) — parked by decision
 
 ## 0. Pricing & billing — NEXT UP
 

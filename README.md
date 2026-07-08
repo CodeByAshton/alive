@@ -125,8 +125,9 @@ Every command shows an **Approve / Deny** card on your screens first; the pause 
 ### Quick health checks, any time
 
 ```bash
-npm run test:auth      # accounts security (offline, no setup needed)
-npm run test:oauth     # connector OAuth (offline, no setup needed)
+npm run test:auth        # accounts security (offline, no setup needed)
+npm run test:oauth       # connector OAuth (offline, no setup needed)
+npm run test:automations # custom learning: scheduler, memory, reflection (offline, no setup needed)
 npm run smoke:supabase # live database round-trip (needs the two SUPABASE exports)
 npm run e2e            # 39 end-to-end checks (start dev first: VAULT_ENABLE_MOCK=1 VAULT_FETCH_ALLOW=localhost npm run dev)
 ```
@@ -171,6 +172,14 @@ That registers the laptop as a device with `exec` capability. While it's connect
 ## Connectors
 
 Customize → Connectors opens a Claude-style gallery of hosted MCP servers (Notion, Linear, Sentry, Stripe, Supabase, GitHub, Zapier, …) plus a Custom option for any MCP URL. OAuth providers are one click: **Connect** opens the service's consent popup and Vault handles the whole flow — discovery, dynamic client registration, PKCE, token refresh. Tokens are AES-256-GCM encrypted before they touch a vault record (set `VAULT_SECRET_KEY` on stateless deploys so authorizations survive redeploys). Each connector carries an **Ask first / Trusted** policy — Ask first routes every tool call through the same on-screen approval cards as commands. `npm run test:oauth` proves the flow offline against a mock OAuth provider.
+
+## Custom learning: automations + memory
+
+The assistant learns, then hands the work off to something that isn't a model.
+
+**Automations** (Customize → Automations) are Markdown files under `.vault/automations/` — frontmatter (name, schedule, enabled), a plain-language paragraph explaining what it does, and a fenced `js` script. A deterministic scheduler on the server fires them with **no model involved**: `notify(...)` reaches every device live (toast) and persists to `.vault/notifications.md`; scripts can also read/write notes and fetch public URLs. Schedules read like speech: `daily 09:00`, `weekdays 08:30`, `weekly mon 18:00`, `every 30 minutes`, `once 2026-07-09 14:00` (interpreted in `settings.timezone` / `VAULT_TIMEZONE`). You never hand-edit a script — **Edit automation** opens a prompt window where you describe the change in plain language and one model call rewrites the file. Ask in chat ("remind me to take my meds at 9") and the assistant saves one through the same on-screen approval cards as commands; the vault-wide kill switch pauses the scheduler too.
+
+**Memory** (the Memory pane in the same view) is a visible, editable note (`.vault/memory/observations.md`) loaded into every turn — the assistant appends to it with `save_memory` when it learns something durable. A daily **reflection** pass (one cheap model call; `VAULT_REFLECTION_MODEL`, default Haiku) mines recent chats for patterns: durable facts land in memory, and repeated asks become *suggested* automations — created disabled, waiting for an explicit Approve in the UI (Dismiss is remembered and never re-proposed). `npm run test:automations` proves the whole loop offline.
 
 ## Web access
 

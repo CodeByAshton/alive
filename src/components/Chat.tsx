@@ -44,6 +44,9 @@ const TOOL_PHRASES: Record<string, string> = {
   move_path: 'Tidying things up…',
   delete_path: 'Tidying things up…',
   run_command: 'Working on your computer…',
+  save_memory: 'Remembering that…',
+  save_automation: 'Setting up an automation…',
+  list_automations: 'Checking your automations…',
 };
 
 function StatusLine({ stream }: { stream: StreamState }) {
@@ -67,12 +70,16 @@ function StatusLine({ stream }: { stream: StreamState }) {
 // Voice-initiated, screen-confirmed: an action the assistant wants to take
 // (a command on your computer, or a connector acting on an external service)
 // waits here until a human on any device approves it.
-function ApprovalCard({ id, command, kind }: { id: string; command: string; kind: 'command' | 'connector' }) {
+function ApprovalCard({ id, command, kind }: { id: string; command: string; kind: 'command' | 'connector' | 'automation' }) {
   return (
     <div className="approval-card flex max-w-[86%] flex-col gap-2.5 self-start rounded-2xl border bg-white p-3.5 shadow-xs animate-in fade-in-0 slide-in-from-bottom-1">
       <div className="flex items-center gap-2 text-[12.5px] font-medium text-neutral-800">
         <ShieldCheck className="size-4 text-neutral-500" />
-        {kind === 'connector' ? 'Let this connector act?' : 'Run this command on your computer?'}
+        {kind === 'connector'
+          ? 'Let this connector act?'
+          : kind === 'automation'
+            ? 'Save this automation? It will run on schedule, unattended.'
+            : 'Run this command on your computer?'}
       </div>
       <code className="block overflow-x-auto rounded-lg border bg-neutral-50 px-3 py-2 font-mono text-[12px] whitespace-pre text-neutral-700">
         {command}
