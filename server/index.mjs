@@ -23,6 +23,7 @@ import { migrateVault, seedVault } from './seed.mjs';
 import { connectorStatus } from './connectors.mjs';
 import { buildZip } from './zip.mjs';
 import { verifySupabaseToken } from './auth.mjs';
+import { completeFlow, disconnect, startFlow } from './oauth.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 8787);
@@ -226,6 +227,56 @@ app.get('/api/connectors', async (req, res) => {
     return res.status(401).json({ error: 'unauthorized' });
   }
   res.json({ connectors: await connectorStatus(ctx.store) });
+});
+// Connector OAuth, Claude-style: /start discovers the provider's OAuth setup,
+// registers Vault as a client, and returns the authorize URL to open; the
+// provider redirects back to /callback, which stores the (encrypted) tokens.
+app.get('/api/oauth/start', async (req, res) => {
+  let ctx;
+  try {
+    ctx = await httpContext(req);
+  } catch {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+  const host = req.headers['x-forwarded-host'] || req.headers.host;
+  try {
+    const url = await startFlow({
+      store: ctx.store,
+      connectorPath: String(req.query.path || ''),
+      redirectUri: `${proto}://${host}/api/oauth/callback`,
+    });
+    res.json({ url });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.get('/api/oauth/callback', async (req, res) => {
+  const page = (title, body) =>
+    res.send(
+      `<!doctype html><meta charset="utf-8"><title>${title}</title><body style="font-family:system-ui;display:grid;place-items:center;height:100vh;margin:0;color:#404040"><div style="text-align:center"><h2 style="font-weight:600">${title}</h2><p style="color:#a3a3a3">${body}</p></div><script>setTimeout(()=>window.close(),1200)</script>`
+    );
+  try {
+    await completeFlow(String(req.query.state || ''), String(req.query.code || ''));
+    page('Connected', 'You can close this window.');
+  } catch (err) {
+    res.status(400);
+    page("That didn't work", err.message);
+  }
+});
+app.get('/api/oauth/disconnect', async (req, res) => {
+  let ctx;
+  try {
+    ctx = await httpContext(req);
+  } catch {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  try {
+    disconnect(ctx.store, String(req.query.path || ''));
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 // Export: the whole vault as a zip of plain Markdown — the "your data is just
 // files" guarantee, downloadable. Chats and .vault system files included.

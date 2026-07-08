@@ -1,8 +1,8 @@
 # Next steps → production
 
 Working checklist for upcoming sessions. State of the world: the prototype is feature-complete and
-covered by `npm run e2e` (38 checks, keyless via the mock engine) plus `npm run test:auth`
-(11 offline accounts-mode checks). Everything below is what stands
+covered by `npm run e2e` (39 checks, keyless via the mock engine) plus `npm run test:auth`
+(11 offline accounts-mode checks) and `npm run test:oauth` (8 offline connector-OAuth checks). Everything below is what stands
 between this and something strangers can download and trust.
 
 ## 1. Validate the real model path (first — everything else builds on it)
@@ -29,7 +29,8 @@ between this and something strangers can download and trust.
 - [x] Kill switch: pause the agent from any surface (Devices panel); per-device revocation still open
 - [x] Scope connector tools: per-connector Ask first / Trusted policy, screen-confirmed through the
       same approval cards as commands (vault-wide Auto mode bypasses, consistent with commands)
-- [ ] Encrypt connector tokens at rest (currently plain in vault records); never log tokens
+- [x] Connector OAuth tokens encrypted at rest (AES-256-GCM via `server/secrets.mjs`; set
+      `VAULT_SECRET_KEY` on stateless deploys); user-pasted static tokens still plain — migrate them
 - [x] Rate limiting (token bucket per connection) + input size caps (2 MB WS payload, 1.5 MB file,
       32k turn text); CORS restrictable via `VAULT_ALLOWED_ORIGINS`
 
@@ -78,7 +79,10 @@ between this and something strangers can download and trust.
 - [ ] Editor: live block-style editing (Notion-like) instead of raw-source Edit tab; drag-drop in tree
 - [x] Search (cmd-K palette across notes + chats, title + content, keyboard-driven)
 - [ ] Graph: local-graph mode for the open note, zoom controls
-- [ ] Connectors: OAuth flow for hosted MCP servers (Notion/Linear/etc.), per-tool toggles
+- [x] Connectors: Claude-style gallery (curated hosted MCP catalog) + full OAuth flow
+      (discovery, dynamic client registration, PKCE, refresh-on-401, encrypted token storage,
+      one-click Connect popup); covered offline by `npm run test:oauth` (8 checks).
+      Per-tool toggles within a connector still open
 - [ ] Skills: template gallery; test-run a skill from the editor
 - [ ] Onboarding: first-run tour; QR code on desktop to open the phone surface pre-configured
 - [ ] Mobile browser polish for the desktop surface (responsive breakpoints)

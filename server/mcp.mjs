@@ -19,7 +19,9 @@ async function post(url, token, body, sessionId) {
   });
   if (!res.ok) {
     const detail = await res.text().catch(() => '');
-    throw new Error(`MCP ${res.status}: ${detail.slice(0, 200)}`);
+    const err = new Error(`MCP ${res.status}: ${detail.slice(0, 200)}`);
+    err.status = res.status;
+    throw err;
   }
   const newSession = res.headers.get('mcp-session-id');
   const contentType = res.headers.get('content-type') || '';

@@ -24,6 +24,8 @@ export interface ConnectorStatus {
   ok: boolean;
   tools: string[];
   error: string | null;
+  authed: boolean; // an OAuth authorization is stored server-side
+  needsAuth: boolean; // the server answered 401 — connect (again)
 }
 
 export function listConnectors(records: Map<string, VaultRecord>): Connector[] {
@@ -72,4 +74,23 @@ export async function fetchConnectorStatus(): Promise<ConnectorStatus[]> {
   const res = await fetch(`${server.httpBase}/api/connectors?${await authQuery()}`);
   if (!res.ok) throw new Error(`status ${res.status}`);
   return (await res.json()).connectors ?? [];
+}
+
+// One-click OAuth: ask the server to set up the flow, open the provider's
+// consent screen in a popup. The popup lands back on our /callback page and
+// closes itself; the caller re-polls status to see the connection go green.
+export async function startConnectorAuth(path: string): Promise<string | null> {
+  const server = getServerConfig();
+  if (!server) return 'Not connected to a server.';
+  const res = await fetch(`${server.httpBase}/api/oauth/start?path=${encodeURIComponent(path)}&${await authQuery()}`);
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) return json.error ?? `HTTP ${res.status}`;
+  window.open(json.url, 'vault-connector-auth', 'width=560,height=720');
+  return null;
+}
+
+export async function disconnectConnectorAuth(path: string): Promise<void> {
+  const server = getServerConfig();
+  if (!server) return;
+  await fetch(`${server.httpBase}/api/oauth/disconnect?path=${encodeURIComponent(path)}&${await authQuery()}`);
 }

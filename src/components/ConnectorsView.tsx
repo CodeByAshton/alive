@@ -3,7 +3,7 @@
 // assistant's toolset on every turn.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Cable, CircleAlert, CircleCheck, Loader2, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { ArrowLeft, Cable, CircleAlert, CircleCheck, KeyRound, Loader2, Plus, RefreshCw, Trash2 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -19,13 +19,16 @@ import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import { useVault } from '../lib/store';
 import {
+  disconnectConnectorAuth,
   fetchConnectorStatus,
   listConnectors,
   newConnectorPath,
   saveConnector,
+  startConnectorAuth,
   type Connector,
   type ConnectorStatus,
 } from '../lib/connectors';
+import { CONNECTOR_CATALOG, type CatalogEntry } from '../lib/catalog';
 import { deletePath } from '../lib/sync';
 import { ConfirmDialog, type ConfirmPrompt } from './dialogs';
 
@@ -58,10 +61,19 @@ export function ConnectorsView() {
   }, [connectors.length]);
 
   const selected = connectors.find((c) => c.path === selectedPath) ?? null;
+  const [gallery, setGallery] = useState(false);
 
-  const createConnector = async () => {
+  const addConnector = async (entry?: CatalogEntry) => {
     const path = newConnectorPath(records);
-    await saveConnector({ path, name: 'New connector', url: '', token: '', enabled: true, policy: 'ask' });
+    await saveConnector({
+      path,
+      name: entry?.name ?? 'New connector',
+      url: entry?.url ?? '',
+      token: '',
+      enabled: true,
+      policy: 'ask',
+    });
+    setGallery(false);
     setSelectedPath(path);
   };
 
@@ -74,7 +86,7 @@ export function ConnectorsView() {
             <Button variant="ghost" size="icon-sm" title="Re-check connectors" onClick={refresh}>
               <RefreshCw className={cn('size-3.5', checking && 'animate-spin')} />
             </Button>
-            <Button size="xs" onClick={createConnector}>
+            <Button size="xs" onClick={() => setGallery(true)}>
               <Plus className="size-3.5" /> New
             </Button>
           </div>
@@ -123,7 +135,9 @@ export function ConnectorsView() {
         </p>
       </div>
 
-      {selected ? (
+      {gallery ? (
+        <Gallery onPick={addConnector} onBack={() => setGallery(false)} />
+      ) : selected ? (
         <ConnectorEditor
           key={selected.path}
           connector={selected}
@@ -138,13 +152,64 @@ export function ConnectorsView() {
           }
         />
       ) : (
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 text-neutral-400">
-          <Cable className="size-6" strokeWidth={1.5} />
-          <p className="text-sm">Add a connector to get started.</p>
-        </div>
+        <Gallery onPick={addConnector} />
       )}
 
       <ConfirmDialog prompt={confirmPrompt} onClose={() => setConfirmPrompt(null)} />
+    </div>
+  );
+}
+
+// Claude-style catalog: the well-known hosted MCP servers, one click to add.
+function Gallery({ onPick, onBack }: { onPick: (entry?: CatalogEntry) => void; onBack?: () => void }) {
+  return (
+    <div className="connector-gallery flex min-w-0 flex-1 flex-col">
+      <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
+        {onBack && (
+          <Button variant="ghost" size="icon-sm" title="Back" onClick={onBack}>
+            <ArrowLeft className="size-4" />
+          </Button>
+        )}
+        <span className="text-[13px] font-medium text-neutral-900">Browse connectors</span>
+      </header>
+      <div className="quiet-scroll flex-1 overflow-y-auto">
+        <div className="mx-auto grid max-w-3xl grid-cols-1 gap-3 px-8 py-8 sm:grid-cols-2">
+          {CONNECTOR_CATALOG.map((entry) => (
+            <button
+              key={entry.slug}
+              className="gallery-card flex cursor-pointer items-start gap-3 rounded-2xl border bg-white p-4 text-left shadow-xs transition-colors hover:bg-neutral-50"
+              onClick={() => onPick(entry)}
+            >
+              <span className="grid size-9 shrink-0 place-items-center rounded-xl border bg-neutral-50 text-[13px] font-semibold text-neutral-600">
+                {entry.name[0]}
+              </span>
+              <span className="min-w-0">
+                <span className="flex items-center gap-1.5 text-[13px] font-medium text-neutral-900">
+                  {entry.name}
+                  <Badge variant="secondary" className="h-4 rounded px-1 text-[9.5px] font-normal tracking-wide text-neutral-400 uppercase">
+                    {entry.auth === 'oauth' ? 'sign in' : entry.auth === 'token' ? 'api token' : 'no account'}
+                  </Badge>
+                </span>
+                <span className="mt-0.5 block text-[11.5px] leading-relaxed text-neutral-400">{entry.description}</span>
+              </span>
+            </button>
+          ))}
+          <button
+            className="gallery-card gallery-custom flex cursor-pointer items-start gap-3 rounded-2xl border border-dashed bg-transparent p-4 text-left transition-colors hover:bg-neutral-50"
+            onClick={() => onPick()}
+          >
+            <span className="grid size-9 shrink-0 place-items-center rounded-xl border bg-neutral-50">
+              <Plus className="size-4 text-neutral-400" />
+            </span>
+            <span className="min-w-0">
+              <span className="block text-[13px] font-medium text-neutral-900">Custom</span>
+              <span className="mt-0.5 block text-[11.5px] leading-relaxed text-neutral-400">
+                Any MCP server by URL — self-hosted or otherwise.
+              </span>
+            </span>
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -179,6 +244,32 @@ function ConnectorEditor({
     }, 600);
   };
 
+  // One-click Authenticate: open the provider's consent popup, then poll the
+  // status until the connection goes green (the popup closes itself).
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!authBusy) return;
+    if (status?.authed && status?.ok) {
+      setAuthBusy(false);
+      return;
+    }
+    const poll = setInterval(onSaved, 2000); // re-fetch status while waiting
+    const giveUp = setTimeout(() => setAuthBusy(false), 120_000);
+    return () => {
+      clearInterval(poll);
+      clearTimeout(giveUp);
+    };
+  }, [authBusy, status?.authed, status?.ok]);
+
+  const connect = async () => {
+    setAuthError(null);
+    const error = await startConnectorAuth(connector.path);
+    if (error) setAuthError(error);
+    else setAuthBusy(true);
+  };
+
   return (
     <div className="flex min-w-0 flex-1 flex-col">
       <header className="flex h-12 shrink-0 items-center justify-between border-b px-4">
@@ -208,7 +299,47 @@ function ConnectorEditor({
               onChange={(e) => update({ url: e.target.value.trim() })}
             />
           </Field>
-          <Field label="Access token" hint="Optional — sent as a Bearer token.">
+          {/* Account connection (OAuth) — shown when the server wants auth or
+              an authorization already exists. Token field covers the rest. */}
+          {(status?.needsAuth || status?.authed) && (
+            <div className="connector-auth flex items-center justify-between gap-4 rounded-xl border bg-neutral-50/60 px-4 py-3">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <KeyRound className="size-4 shrink-0 text-neutral-500" />
+                <div className="min-w-0">
+                  <div className="text-[13px] font-medium text-neutral-800">
+                    {status?.authed && status?.ok ? 'Connected to your account' : 'Sign in to use this connector'}
+                  </div>
+                  <div className="mt-0.5 text-[11.5px] text-neutral-400">
+                    {authError
+                      ? authError
+                      : status?.authed && status?.ok
+                        ? 'Vault is authorized. Disconnect to revoke.'
+                        : 'Opens the service in a popup — approve access and you’re done.'}
+                  </div>
+                </div>
+              </div>
+              {status?.authed && status?.ok ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="disconnect shrink-0"
+                  onClick={async () => {
+                    await disconnectConnectorAuth(connector.path);
+                    onSaved();
+                  }}
+                >
+                  Disconnect
+                </Button>
+              ) : (
+                <Button size="sm" className="connect shrink-0" disabled={authBusy} onClick={connect}>
+                  {authBusy ? <Loader2 className="size-3.5 animate-spin" /> : <KeyRound className="size-3.5" />}
+                  Connect
+                </Button>
+              )}
+            </div>
+          )}
+
+          <Field label="Access token" hint="Optional — sent as a Bearer token. Not needed when you connect with your account above.">
             <Input
               value={draft.token}
               type="password"

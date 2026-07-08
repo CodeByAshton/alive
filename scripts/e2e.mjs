@@ -261,7 +261,12 @@ await desktop2.locator('.nav-item[title="Customize"]').hover();
 await desktop2.locator('.customize-menu [role="menuitem"]', { hasText: 'Connectors' }).click();
 await desktop2.waitForSelector('.connectors-view', { timeout: 5000 });
 await desktop2.locator('.connectors-view button', { hasText: 'New' }).click();
-await desktop2.waitForSelector('.connectors-view input[placeholder="https…"], .connectors-view input[placeholder="https…"]', { timeout: 3000 }).catch(() => {});
+// The gallery opens Claude-style; pick "Custom" for the local mock server.
+await desktop2.waitForSelector('.connector-gallery', { timeout: 3000 });
+const galleryText = await desktop2.locator('.connector-gallery').innerText();
+check('connector gallery lists known services', galleryText.includes('Notion') && galleryText.includes('Linear'));
+await desktop2.locator('.gallery-custom').click();
+await desktop2.waitForSelector('.connectors-view input', { timeout: 3000 });
 await desktop2.locator('.connectors-view input').nth(1).fill('http://localhost:8975/mcp');
 await desktop2.waitForTimeout(1200); // debounce save + status refresh
 const connectorPanel = await desktop2.locator('.connectors-view').innerText();
