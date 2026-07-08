@@ -107,6 +107,10 @@ npm run node-harness -- --server ws://<vault-host>:8787 --workspace ~/dev/myproj
 
 That registers the laptop as a device with `exec` capability. While it's connected, every turn's toolset includes `run_command` (shell in the workspace: git, builds, tests, installed CLIs like `claude` or `codex`). Close the terminal and the capability vanishes from the next turn. Commands are dispatched over the same WebSocket, run with a timeout inside the workspace, and stream their output back into the conversation on every device.
 
+## Web access
+
+The assistant can read the web in every conversation: a `fetch_url` tool (any provider, any model — SSRF-guarded so only public addresses are reachable) plus Anthropic's native `web_search` when the provider is Claude (real search results with citations, executed server-side by the API; disable with `VAULT_WEB_SEARCH=0`).
+
 ## Context wiring
 
 - **`AGENT.md`** at the vault root is the vault's CLAUDE.md — standing instructions loaded into every turn. Edit it like any note.

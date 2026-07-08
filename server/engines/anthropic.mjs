@@ -24,6 +24,13 @@ export function createAnthropicEngine() {
         description: t.description,
         input_schema: t.input_schema,
       }));
+      // Anthropic's server-side web search: real search results with
+      // citations, executed by the API (billed per search). fetch_url in the
+      // harness covers direct page reads for every provider; this adds
+      // actual searching for Claude. Disable with VAULT_WEB_SEARCH=0.
+      if (process.env.VAULT_WEB_SEARCH !== '0') {
+        providerTools.push({ type: 'web_search_20250305', name: 'web_search', max_uses: 5 });
+      }
 
       const toolsUsed = [];
       let finalText = '';

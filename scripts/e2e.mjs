@@ -2,7 +2,9 @@
 // a desktop surface and a phone surface in separate browser contexts
 // (separate storage = separate devices), plus the node harness (a third
 // device class that contributes exec capability).
-// Run with: VAULT_ENABLE_MOCK=1 server + vite running, then `node scripts/e2e.mjs`
+// Run with: VAULT_ENABLE_MOCK=1 VAULT_FETCH_ALLOW=localhost server + vite
+// running, then `node scripts/e2e.mjs` (the fetch check reads a localhost
+// URL, which the SSRF guard would otherwise refuse).
 
 import { spawn } from 'node:child_process';
 import { chromium } from 'playwright';
@@ -325,6 +327,21 @@ await desktop2.locator('.nav-item[title="Files"]').click();
 await desktop2.waitForTimeout(800);
 const treeAfterConflict = await desktop2.locator('.tree').innerText();
 check('losing write becomes a conflicted copy', treeAfterConflict.includes('conflicted copy'), treeAfterConflict.split('\n').find((l) => l.includes('conflicted')) ?? '');
+
+// 13i. WEB ACCESS: the assistant can read pages by URL (fetch_url), and the
+// SSRF guard refuses private addresses so the server can't be used as a
+// periscope into internal networks.
+await phone.locator('.composer textarea').fill('fetch http://localhost:8787/api/health');
+await phone.locator('.composer .send').click();
+await phone.waitForTimeout(2500);
+lastReply = await phone.locator('.bubble.assistant').last().innerText();
+check('assistant reads a web page by URL', lastReply.includes('"ok"'), lastReply.slice(0, 80));
+
+await phone.locator('.composer textarea').fill('fetch http://169.254.169.254/latest/meta-data');
+await phone.locator('.composer .send').click();
+await phone.waitForTimeout(2500);
+lastReply = await phone.locator('.bubble.assistant').last().innerText();
+check('SSRF guard refuses private addresses', lastReply.includes('private network'), lastReply.slice(0, 80));
 
 // 14. Message files carry frontmatter with device + model provenance
 const chatFolderCheck = await desktop2.evaluate(async () => {

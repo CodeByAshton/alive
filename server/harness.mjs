@@ -6,6 +6,7 @@
 import { parseFrontmatter, serializeFrontmatter } from '../shared/frontmatter.mjs';
 import { getEngine } from './engines/index.mjs';
 import { connectorToolDefs, executeConnectorTool, isConnectorTool } from './connectors.mjs';
+import { fetchUrl } from './web.mjs';
 
 const SYSTEM_PROMPT = `You are the resident assistant of Vault — a personal knowledge workspace where everything is a Markdown file in a folder tree, notes link to each other with [[wikilinks]], and your conversations with the user are themselves folders of Markdown files in the same vault.
 
@@ -81,6 +82,13 @@ const VAULT_TOOLS = [
     capability: 'write',
   },
   {
+    name: 'fetch_url',
+    description:
+      'Fetch a public web page or API by URL (HTTP GET) and return its readable text. Use it to read documentation, articles, or anything the user links to. Only public addresses are reachable.',
+    input_schema: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] },
+    capability: 'read',
+  },
+  {
     name: 'run_command',
     description:
       "Run a shell command in the user's active workspace on their computer. Use it for coding tasks: git, builds, tests, inspecting files outside the vault, or invoking installed CLIs (e.g. claude, codex, npm, python). Returns stdout+stderr, truncated.",
@@ -145,6 +153,8 @@ function makeToolExecutor(store, execRemote) {
         if (!rec || rec.type !== 'file') throw new Error(`No file at ${input.path}`);
         return rec.content;
       }
+      case 'fetch_url':
+        return fetchUrl(input.url);
       case 'create_note':
       case 'edit_note': {
         const path = sanitizePath(input.path);

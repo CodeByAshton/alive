@@ -1,7 +1,8 @@
 # Next steps → production
 
 Working checklist for upcoming sessions. State of the world: the prototype is feature-complete and
-covered by `npm run e2e` (36 checks, keyless via the mock engine). Everything below is what stands
+covered by `npm run e2e` (38 checks, keyless via the mock engine) plus `npm run test:auth`
+(11 offline accounts-mode checks). Everything below is what stands
 between this and something strangers can download and trust.
 
 ## 1. Validate the real model path (first — everything else builds on it)

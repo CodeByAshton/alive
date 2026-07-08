@@ -115,6 +115,7 @@ function createMockEngine() {
       // Deterministic behaviors so tests can exercise the tool loop.
       const noteMatch = last.match(/create (?:a )?note (?:called |named )?["']?([\w./ -]+?)["']?(?: with content ["'](.+?)["'])?$/i);
       const cmdMatch = last.match(/run (?:the )?command[: ]+(.+)$/i);
+      const fetchMatch = last.match(/fetch (https?:\/\/\S+)/i);
       const connectorMatch = last.match(/connector .*?say (.+)$/i);
       const connectorTool = tools.find((t) => t.name.startsWith('c_'));
       const canWrite = tools.some((t) => t.name === 'create_note');
@@ -130,6 +131,17 @@ function createMockEngine() {
         } catch (err) {
           onEvent({ type: 'tool_result', name: connectorTool.name, ok: false });
           text = await say(`The connector didn't answer: ${err.message}`);
+        }
+      } else if (fetchMatch && tools.some((t) => t.name === 'fetch_url')) {
+        onEvent({ type: 'tool_start', name: 'fetch_url', input: { url: fetchMatch[1] } });
+        toolsUsed.push('fetch_url');
+        try {
+          const output = await executeTool('fetch_url', { url: fetchMatch[1] });
+          onEvent({ type: 'tool_result', name: 'fetch_url', ok: true });
+          text = await say(`Here's what that page says: ${String(output).slice(0, 300)}`);
+        } catch (err) {
+          onEvent({ type: 'tool_result', name: 'fetch_url', ok: false });
+          text = await say(`I couldn't fetch that: ${err.message}`);
         }
       } else if (cmdMatch && canExec) {
         onEvent({ type: 'tool_start', name: 'run_command', input: { command: cmdMatch[1] } });
