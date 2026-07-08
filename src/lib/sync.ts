@@ -12,6 +12,7 @@ import type { AssistantMode, VaultRecord } from './types';
 import { getDeviceId, getSurface } from './device';
 import { getServerConfig } from './config';
 import { authQuery } from './auth';
+import { notifyLive } from './notifications';
 
 let ws: WebSocket | null = null;
 let started = false;
@@ -92,6 +93,8 @@ async function connect() {
         const id = `notice-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         state.addNotice({ id, title: String(msg.title ?? ''), message: String(msg.message ?? '') });
         setTimeout(() => useVault.getState().removeNotice(id), 8000);
+        // Backgrounded app/tab: raise a system notification too.
+        notifyLive(String(msg.title ?? 'Vault'), String(msg.message ?? ''));
         break;
       }
       case 'automation_edited':

@@ -8,90 +8,21 @@
 
 import vm from 'node:vm';
 import { parseFrontmatter, serializeFrontmatter } from '../shared/frontmatter.mjs';
+import { isDue, parseSchedule } from '../shared/schedule.mjs';
 import { getEngine } from './engines/index.mjs';
 import { fetchUrl } from './web.mjs';
+
+// The schedule grammar lives in shared/schedule.mjs (the phone uses it too,
+// to mirror reminders into local notifications); re-export for callers/tests.
+export { isDue, nextOccurrence, nextOccurrences, parseSchedule } from '../shared/schedule.mjs';
 
 export const AUTOMATIONS_DIR = '.vault/automations';
 export const NOTIFICATIONS_FILE = '.vault/notifications.md';
 
 const TICK_MS = Number(process.env.VAULT_AUTOMATION_TICK_MS || 30_000);
-const MISSED_GRACE_MS = 26 * 60 * 60 * 1000; // fire a missed occurrence up to ~a day late, once
 const SCRIPT_TIMEOUT_MS = 10_000;
 const MAX_SCRIPT_OPS = 100;
 const MAX_NOTIFICATION_LINES = 200;
-
-/* ── schedule grammar ────────────────────────────────────────────────────
-   daily HH:MM | weekdays HH:MM | weekly <mon..sun> HH:MM |
-   every N minutes | every N hours | once YYYY-MM-DD HH:MM
-   Times are interpreted in the vault's timezone (settings.timezone, then
-   VAULT_TIMEZONE, then the server's). */
-
-const WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-
-export function parseSchedule(raw) {
-  const s = String(raw || '').trim().toLowerCase().replace(/\s+/g, ' ');
-  let m;
-  if ((m = s.match(/^daily (?:at )?(\d{1,2}):(\d{2})$/))) return { kind: 'daily', hh: +m[1], mm: +m[2] };
-  if ((m = s.match(/^weekdays (?:at )?(\d{1,2}):(\d{2})$/))) return { kind: 'weekdays', hh: +m[1], mm: +m[2] };
-  if ((m = s.match(/^weekly (sun|mon|tue|wed|thu|fri|sat)[a-z]* (?:at )?(\d{1,2}):(\d{2})$/)))
-    return { kind: 'weekly', day: WEEKDAYS.indexOf(m[1]), hh: +m[2], mm: +m[3] };
-  if ((m = s.match(/^every (\d+) minutes?$/))) return { kind: 'minutes', n: Math.max(1, +m[1]) };
-  if ((m = s.match(/^every (\d+) hours?$/))) return { kind: 'hours', n: Math.max(1, +m[1]) };
-  if ((m = s.match(/^once (\d{4})-(\d{2})-(\d{2})[ t](\d{1,2}):(\d{2})$/)))
-    return { kind: 'once', y: +m[1], mo: +m[2], d: +m[3], hh: +m[4], mm: +m[5] };
-  return null;
-}
-
-// Wall-clock parts of a timestamp in a timezone, via Intl (no tz database
-// dependency). Falls back to server-local on a bad timezone string.
-function zonedParts(ms, timeZone) {
-  let fmt;
-  try {
-    fmt = new Intl.DateTimeFormat('en-US', {
-      timeZone: timeZone || undefined,
-      year: 'numeric', month: 'numeric', day: 'numeric',
-      hour: 'numeric', minute: 'numeric', hour12: false, weekday: 'short',
-    });
-  } catch {
-    fmt = new Intl.DateTimeFormat('en-US', {
-      year: 'numeric', month: 'numeric', day: 'numeric',
-      hour: 'numeric', minute: 'numeric', hour12: false, weekday: 'short',
-    });
-  }
-  const parts = Object.fromEntries(fmt.formatToParts(ms).map((p) => [p.type, p.value]));
-  return {
-    y: +parts.year, mo: +parts.month, d: +parts.day,
-    hh: +parts.hour % 24, mm: +parts.minute,
-    day: WEEKDAYS.indexOf(parts.weekday.slice(0, 3).toLowerCase()),
-  };
-}
-
-function minuteMatches(spec, ms, timeZone) {
-  if (spec.kind === 'minutes') return Math.floor(ms / 60_000) % spec.n === 0;
-  const p = zonedParts(ms, timeZone);
-  switch (spec.kind) {
-    case 'daily': return p.hh === spec.hh && p.mm === spec.mm;
-    case 'weekdays': return p.day >= 1 && p.day <= 5 && p.hh === spec.hh && p.mm === spec.mm;
-    case 'weekly': return p.day === spec.day && p.hh === spec.hh && p.mm === spec.mm;
-    case 'hours': return p.mm === 0 && p.hh % spec.n === 0;
-    case 'once':
-      return p.y === spec.y && p.mo === spec.mo && p.d === spec.d && p.hh === spec.hh && p.mm === spec.mm;
-    default: return false;
-  }
-}
-
-// Scan whole minutes in (since, now] for a match. Missed occurrences (server
-// asleep, laptop closed) collapse into a single late firing inside the grace
-// window — a late reminder beats a silently dropped one.
-export function isDue(spec, sinceMs, nowMs, timeZone) {
-  const start = Math.max(sinceMs, nowMs - MISSED_GRACE_MS);
-  let minute = Math.floor(start / 60_000) + 1;
-  const lastMinute = Math.floor(nowMs / 60_000);
-  for (; minute <= lastMinute; minute++) {
-    if (minuteMatches(spec, minute * 60_000, timeZone)) return true;
-  }
-  return false;
-}
 
 /* ── automation records ─────────────────────────────────────────────────── */
 

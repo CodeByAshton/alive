@@ -7,7 +7,14 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isDue, parseSchedule, runScript, validateAutomation } from '../server/automations.mjs';
+import {
+  isDue,
+  nextOccurrence,
+  nextOccurrences,
+  parseSchedule,
+  runScript,
+  validateAutomation,
+} from '../server/automations.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = 8899;
@@ -49,6 +56,23 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   check('validateAutomation rejects bad schedules',
     validateAutomation({ name: 'x', schedule: 'sometimes', script: 'notify("hi")' }) !== null &&
     validateAutomation({ name: 'x', schedule: 'daily 09:00', script: 'notify("hi")' }) === null);
+
+  // nextOccurrence(s) — what the phone uses to mirror reminders into local
+  // notifications. 2026-07-08 is a Wednesday.
+  check('nextOccurrence: daily rolls to tomorrow after today’s time',
+    nextOccurrence(parseSchedule('daily 09:00'), Date.UTC(2026, 6, 8, 9, 0, 30), 'UTC') === Date.UTC(2026, 6, 9, 9, 0));
+  check('nextOccurrence: weekly lands on the right weekday',
+    nextOccurrence(parseSchedule('weekly mon 18:00'), Date.UTC(2026, 6, 8, 12, 0), 'UTC') === Date.UTC(2026, 6, 13, 18, 0));
+  check('nextOccurrence: weekdays skips the weekend',
+    nextOccurrence(parseSchedule('weekdays 09:00'), Date.UTC(2026, 6, 10, 10, 0), 'UTC') === Date.UTC(2026, 6, 13, 9, 0));
+  check('nextOccurrence: past once returns null',
+    nextOccurrence(parseSchedule('once 2026-07-08 09:00'), Date.UTC(2026, 6, 9, 0, 0), 'UTC') === null &&
+    nextOccurrence(parseSchedule('once 2026-07-08 09:00'), Date.UTC(2026, 6, 1, 0, 0), 'UTC') === Date.UTC(2026, 6, 8, 9, 0));
+  check('nextOccurrences: consecutive interval runs',
+    JSON.stringify(nextOccurrences(parseSchedule('every 5 minutes'), Date.UTC(2026, 6, 8, 9, 1), 3, 'UTC')) ===
+    JSON.stringify([Date.UTC(2026, 6, 8, 9, 5), Date.UTC(2026, 6, 8, 9, 10), Date.UTC(2026, 6, 8, 9, 15)]));
+  check('nextOccurrence: timezone-aware fixed times',
+    nextOccurrence(parseSchedule('daily 09:00'), Date.UTC(2026, 6, 8, 12, 0), 'America/Chicago') === Date.UTC(2026, 6, 8, 14, 0));
 }
 
 /* ── unit: script sandbox ───────────────────────────────────────────────── */

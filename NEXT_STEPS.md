@@ -10,9 +10,12 @@ covered by `npm run e2e` (39 checks, keyless via the mock engine) plus `npm run 
 Automations (non-model scheduler + script sandbox), memory, and daily reflection are in
 (see README "Custom learning"). Deliberately deferred:
 
-- [ ] Delivery when no device is connected: notifications persist to `.vault/notifications.md` and
-      toast on connected surfaces, but there's no push yet — wire Capacitor local/push notifications
-      (iOS) and Web Push (browser) so a reminder lands on a pocketed phone
+- [x] Delivery to a pocketed phone: the iOS app mirrors reminder schedules into **local
+      notifications** (computed on-device from synced automation files via `shared/schedule.mjs`) —
+      they fire with the app closed, no APNs; live `notify()` events also raise system notifications
+      on backgrounded surfaces (native + web Notification API). Bell toggle on the phone surface.
+- [ ] Remote push (APNs / Web Push) for *conditional* script output — a `notify()` behind an `if`
+      can't be precomputed on the device; needs Apple Developer account + a push relay on the server
 - [ ] Timezone UI: scheduler honors `.vault/settings.json` `timezone` / `VAULT_TIMEZONE`; add a
       Settings picker so users don't edit JSON
 - [ ] Trust boundary marker: automation scripts run in a node:vm sandbox with op/time caps — fine

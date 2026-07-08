@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { startSync, surface } from './lib/sync';
+import { initNotifications } from './lib/notifications';
 import { useVault } from './lib/store';
 import { getServerConfig } from './lib/config';
 import { hasSession, loadAuthConfig } from './lib/auth';
@@ -106,6 +107,7 @@ export default function App() {
       }
       setAuth('ready');
       startSync();
+      initNotifications();
     })();
   }, [configured]);
 
@@ -116,6 +118,7 @@ export default function App() {
         onSignedIn={() => {
           setAuth('ready');
           startSync();
+          initNotifications();
         }}
       />
     );

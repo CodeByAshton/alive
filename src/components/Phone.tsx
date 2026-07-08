@@ -3,7 +3,7 @@
 // the assistant can do everywhere.
 
 import { useEffect, useRef, useState } from 'react';
-import { Mic, Volume2 } from 'lucide-react';
+import { Bell, BellOff, Mic, Volume2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils';
 import { useVault } from '../lib/store';
 import { chatMessages, getChatConfig } from '../lib/chat';
 import { onTurnDone, sendTurn } from '../lib/sync';
+import { notificationsEnabled, notificationsSupported, setNotificationsEnabled } from '../lib/notifications';
 import { voice } from '../lib/voice';
 import { Chat } from './Chat';
 
@@ -20,6 +21,7 @@ export function Phone() {
   const [listening, setListening] = useState(false);
   const [speak, setSpeak] = useState(true);
   const [interim, setInterim] = useState('');
+  const [notifs, setNotifs] = useState(notificationsEnabled());
   const stopRef = useRef<(() => void) | null>(null);
 
   // Voice-initiated, screen-confirmed: spoken input becomes a normal turn;
@@ -67,6 +69,17 @@ export function Phone() {
         <span className="text-sm font-semibold tracking-tight">Vault</span>
         <span className={cn('size-1.5 rounded-full', connected ? 'bg-neutral-800' : 'bg-neutral-300')} />
         <span className="flex-1" />
+        {notificationsSupported() && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="notif-toggle"
+            title={notifs ? 'Reminders will notify this phone — tap to turn off' : 'Turn on reminder notifications'}
+            onClick={async () => setNotifs(await setNotificationsEnabled(!notifs))}
+          >
+            {notifs ? <Bell className="size-4 text-neutral-700" /> : <BellOff className="size-4 text-neutral-400" />}
+          </Button>
+        )}
         <label className="voice-toggle flex items-center gap-1.5 text-xs text-neutral-500">
           <Volume2 className="size-3.5" />
           <Switch checked={speak} onCheckedChange={setSpeak} title="Speak replies aloud" />
