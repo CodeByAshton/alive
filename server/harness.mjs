@@ -5,12 +5,15 @@
 
 import { parseFrontmatter, serializeFrontmatter } from '../shared/frontmatter.mjs';
 import { getEngine } from './engines/index.mjs';
+import { connectorToolDefs, executeConnectorTool, isConnectorTool } from './connectors.mjs';
 
 const SYSTEM_PROMPT = `You are the resident assistant of Vault — a personal knowledge workspace where everything is a Markdown file in a folder tree, notes link to each other with [[wikilinks]], and your conversations with the user are themselves folders of Markdown files in the same vault.
 
 You may have tools for reading and editing the vault. Use whatever tools are currently available to you; if a capability isn't available right now, work conversationally instead — discuss, plan, and remember, and simply carry the intent forward. Never mention, speculate about, or allude to which device the user is using, why your capabilities might vary, or that tools appeared or disappeared. Do not say things like "I notice you're on your phone" or "now that you're at your desk". Just behave appropriately.
 
-When you edit the vault, narrate briefly what you're doing as you work (one short sentence per action), because the user may be listening rather than watching. Use [[wikilinks]] when referring to notes. Prefer creating notes under an appropriate existing folder. Keep responses concise.`;
+When you edit the vault, narrate briefly what you're doing as you work (one short sentence per action), because the user may be listening rather than watching. Use [[wikilinks]] when referring to notes. Prefer creating notes under an appropriate existing folder. Keep responses concise.
+
+System files live under .vault/ (hidden from the user's file tree): your standing instructions are .vault/AGENT.md — when the user asks you to change how you behave going forward, update that file. Skills live under .vault/skills/. Do not create ordinary notes inside .vault/.`;
 
 const VAULT_TOOLS = [
   {
@@ -183,7 +186,7 @@ function loadSkill(store, text) {
   const match = text.match(/^\/([\w-]+)\b/);
   if (!match) return null;
   const trigger = '/' + match[1].toLowerCase();
-  for (const rec of store.list('skills')) {
+  for (const rec of [...store.list('.vault/skills'), ...store.list('skills')]) {
     if (rec.type !== 'file' || !rec.path.endsWith('.md')) continue;
     const { data, body } = parseFrontmatter(rec.content);
     if (String(data.trigger || '').toLowerCase() === trigger) {
@@ -244,7 +247,7 @@ function collectReferencedFiles(store, text) {
   return files;
 }
 
-const AGENT_FILE = 'AGENT.md';
+const AGENT_FILE = '.vault/AGENT.md';
 
 function vaultOutline(store) {
   const paths = store
@@ -272,8 +275,9 @@ export async function runTurn({ store, presence, chatPath, text, deviceType, pro
   // 2. Slash command? Load the skill (itself vault content) into this turn.
   const skill = loadSkill(store, text);
 
-  // 3. Assemble tools from what's present *right now*.
-  const tools = assembleTools(presence);
+  // 3. Assemble tools from what's present *right now* — device capabilities
+  // plus tools contributed by enabled connectors (external MCP servers).
+  const tools = [...assembleTools(presence), ...(await connectorToolDefs(store))];
 
   // 4. Rebuild the conversation from the chat folder records.
   const messages = readConversation(store, chatPath);
@@ -282,7 +286,7 @@ export async function runTurn({ store, presence, chatPath, text, deviceType, pro
 
   // Standing vault instructions — the CLAUDE.md of this vault. User-editable,
   // loaded into every turn.
-  const agentFile = store.get(AGENT_FILE);
+  const agentFile = store.get(AGENT_FILE) || store.get('AGENT.md');
   if (agentFile) {
     system += `\n\nStanding instructions from ${AGENT_FILE} (set by the user; follow them):\n${agentFile.content.slice(0, 6000)}`;
   }
@@ -307,6 +311,7 @@ export async function runTurn({ store, presence, chatPath, text, deviceType, pro
   const filesTouched = [];
   const baseExecutor = makeToolExecutor(store, execRemote);
   const trackingExecutor = async (name, input) => {
+    if (isConnectorTool(name)) return executeConnectorTool(store, name, input);
     const result = await baseExecutor(name, input);
     if (['create_note', 'edit_note', 'append_note'].includes(name) && input?.path) {
       filesTouched.push(sanitizePath(input.path));

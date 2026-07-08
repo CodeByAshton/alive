@@ -2,7 +2,7 @@
 // Devices), and the active section below. Notion/Linear-flavored — rows on a
 // soft gray canvas, hairlines, rounded corners.
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   ChevronRight,
   FileText,
@@ -15,6 +15,8 @@ import {
   PencilLine,
   Plus,
   SquarePen,
+  Cable,
+  SlidersHorizontal,
   Trash2,
   Waypoints,
   Zap,
@@ -34,8 +36,8 @@ import { cn } from '@/lib/utils';
 import { useVault } from '../lib/store';
 import { deletePath, movePath, putRecord } from '../lib/sync';
 import { createChat, getChatConfig, listChats } from '../lib/chat';
-import { parseFrontmatter, serializeFrontmatter } from '../../shared/frontmatter.mjs';
 import type { VaultRecord } from '../lib/types';
+import { SettingsDialog } from './SettingsDialog';
 import { ConfirmDialog, NameDialog, type ConfirmPrompt, type NamePrompt } from './dialogs';
 
 /* ── shared dialog state, exposed to panels via callbacks ─────────────── */
@@ -57,7 +59,9 @@ interface TreeNode {
 function buildTree(records: Map<string, VaultRecord>): TreeNode[] {
   const roots: TreeNode[] = [];
   const byPath = new Map<string, TreeNode>();
-  const sorted = [...records.values()].sort((a, b) => a.path.localeCompare(b.path));
+  const sorted = [...records.values()]
+    .filter((r) => !r.path.startsWith('.'))
+    .sort((a, b) => a.path.localeCompare(b.path));
 
   for (const rec of sorted) {
     const node: TreeNode = { path: rec.path, name: rec.path.split('/').pop()!, type: rec.type, children: [] };
@@ -240,63 +244,6 @@ function ChatsSection() {
   );
 }
 
-/* ── skills ───────────────────────────────────────────────────────────── */
-
-const SKILL_TEMPLATE = (name: string, trigger: string) =>
-  serializeFrontmatter(
-    { name, trigger, description: 'Describe what this skill does.' },
-    'Instructions the assistant follows when this skill is invoked. Write them like you would brief a colleague.\n'
-  );
-
-function SkillsSection() {
-  const records = useVault((s) => s.records);
-  const activePath = useVault((s) => s.activePath);
-  const openFile = useVault((s) => s.openFile);
-
-  const skills = useMemo(() => {
-    const out: { path: string; name: string; trigger: string; description: string }[] = [];
-    for (const rec of records.values()) {
-      if (rec.type !== 'file' || !rec.path.startsWith('skills/') || !rec.path.endsWith('.md')) continue;
-      const { data } = parseFrontmatter(rec.content);
-      out.push({
-        path: rec.path,
-        name: String(data.name || rec.path.split('/').pop()!.replace(/\.md$/, '')),
-        trigger: String(data.trigger || ''),
-        description: String(data.description || ''),
-      });
-    }
-    return out.sort((a, b) => a.name.localeCompare(b.name));
-  }, [records]);
-
-  return (
-    <div className="panel-list flex flex-col gap-px">
-      {skills.map((s) => (
-        <div
-          key={s.path}
-          className={cn(
-            'panel-row flex cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 text-[13px] text-neutral-600 transition-colors select-none',
-            'hover:bg-neutral-200/55 hover:text-neutral-900',
-            activePath === s.path && 'bg-white text-neutral-900 shadow-xs'
-          )}
-          onClick={() => openFile(s.path, 'read')}
-        >
-          <Zap className="mt-0.5 size-[15px] shrink-0 text-neutral-400" />
-          <span className="min-w-0 flex-1">
-            <span className="block truncate font-medium">{s.name}</span>
-            <span className="block truncate text-[11px] text-neutral-400">
-              <span className="font-mono">{s.trigger}</span> · {s.description}
-            </span>
-          </span>
-        </div>
-      ))}
-      {!skills.length && <div className="px-2 py-4 text-xs text-neutral-400">No skills yet.</div>}
-      <p className="px-2 pt-3 text-[11px] leading-relaxed text-neutral-400">
-        Skills are vault files — invoke one in chat with its slash command.
-      </p>
-    </div>
-  );
-}
-
 /* ── devices ──────────────────────────────────────────────────────────── */
 
 function DevicesSection() {
@@ -328,10 +275,59 @@ function DevicesSection() {
 const MENU = [
   { id: 'files', icon: Folder, label: 'Files' },
   { id: 'chats', icon: MessageSquare, label: 'Chats' },
-  { id: 'skills', icon: Zap, label: 'Skills' },
+  { id: 'customize', icon: SlidersHorizontal, label: 'Customize' },
   { id: 'graph', icon: Waypoints, label: 'Graph' },
   { id: 'devices', icon: MonitorSmartphone, label: 'Devices' },
 ] as const;
+
+// Claude-style Customize entry: a hover dropdown holding Skills + Connectors.
+function CustomizeItem({ className }: { className: (active: boolean) => string }) {
+  const mainView = useVault((s) => s.mainView);
+  const setMainView = useVault((s) => s.setMainView);
+  const [open, setOpen] = useState(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  const openNow = () => {
+    clearTimeout(closeTimer.current);
+    setOpen(true);
+  };
+  const closeSoon = () => {
+    clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(() => setOpen(false), 160);
+  };
+
+  return (
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>
+        <button
+          title="Customize"
+          className={className(mainView === 'skills' || mainView === 'connectors')}
+          onMouseEnter={openNow}
+          onMouseLeave={closeSoon}
+        >
+          <SlidersHorizontal className="size-4 text-neutral-400" />
+          <span className="flex-1 text-left">Customize</span>
+          <ChevronRight className="size-3 text-neutral-300" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        side="right"
+        align="start"
+        sideOffset={4}
+        className="customize-menu w-44"
+        onMouseEnter={openNow}
+        onMouseLeave={closeSoon}
+      >
+        <DropdownMenuItem onClick={() => setMainView('skills')}>
+          <Zap /> Skills
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setMainView('connectors')}>
+          <Cable /> Connectors
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 export function Sidebar() {
   const railTab = useVault((s) => s.railTab);
@@ -372,19 +368,6 @@ export function Sidebar() {
       },
     });
 
-  const newSkill = () =>
-    dialogs.ask({
-      title: 'New skill',
-      description: 'The trigger becomes /name.',
-      placeholder: 'Skill name',
-      onSubmit: async (name) => {
-        const slug = name.toLowerCase().replace(/[^a-z0-9-]+/g, '-');
-        const path = `skills/${slug}.md`;
-        await putRecord(path, 'file', SKILL_TEMPLATE(name, `/${slug}`));
-        openFile(path, 'edit');
-      },
-    });
-
   const newChat = async () => {
     const config = { provider: 'anthropic', model: 'claude-opus-4-8' };
     setActiveChat(await createChat(getChatConfigSafe(records) ?? config));
@@ -416,19 +399,24 @@ export function Sidebar() {
           </TooltipTrigger>
           <TooltipContent>New folder</TooltipContent>
         </Tooltip>
+        <SettingsDialog />
       </div>
 
       {/* menu items */}
       <nav className="mb-2 flex flex-col gap-px">
-        {MENU.map((item) => (
+        {MENU.map((item) => {
+          const navCls = (active: boolean) =>
+            cn(
+              'nav-item group flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 text-[13px] font-medium text-neutral-600 transition-colors select-none',
+              'hover:bg-neutral-200/55 hover:text-neutral-900',
+              active && 'bg-white text-neutral-900 shadow-xs'
+            );
+          if (item.id === 'customize') return <CustomizeItem key={item.id} className={navCls} />;
+          return (
           <button
             key={item.id}
             title={item.label}
-            className={cn(
-              'nav-item group flex h-8 cursor-pointer items-center gap-2.5 rounded-lg px-2 text-[13px] font-medium text-neutral-600 transition-colors select-none',
-              'hover:bg-neutral-200/55 hover:text-neutral-900',
-              (item.id === 'graph' ? mainView === 'graph' : railTab === item.id) && 'bg-white text-neutral-900 shadow-xs'
-            )}
+            className={navCls(item.id === 'graph' ? mainView === 'graph' : railTab === item.id)}
             onClick={() => {
               if (item.id === 'graph') {
                 setMainView('graph');
@@ -458,21 +446,9 @@ export function Sidebar() {
                 <Plus className="size-3.5" />
               </span>
             )}
-            {item.id === 'skills' && (
-              <span
-                role="button"
-                title="New skill"
-                className="rounded-md p-0.5 text-neutral-400 opacity-0 transition-opacity group-hover:opacity-100 hover:text-neutral-900"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  newSkill();
-                }}
-              >
-                <Plus className="size-3.5" />
-              </span>
-            )}
           </button>
-        ))}
+          );
+        })}
       </nav>
 
       <div className="mx-1 mb-2 h-px bg-neutral-200/70" />
@@ -481,7 +457,6 @@ export function Sidebar() {
       <div className="quiet-scroll -mx-1 flex-1 overflow-y-auto px-1">
         {railTab === 'files' && <FilesSection dialogs={dialogs} />}
         {railTab === 'chats' && <ChatsSection />}
-        {railTab === 'skills' && <SkillsSection />}
         {railTab === 'devices' && <DevicesSection />}
       </div>
 

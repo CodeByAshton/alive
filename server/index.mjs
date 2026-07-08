@@ -12,7 +12,8 @@ import { VaultStore } from './store.mjs';
 import { PresenceRegistry } from './presence.mjs';
 import { runTurn } from './harness.mjs';
 import { listProviders } from './engines/index.mjs';
-import { seedVault } from './seed.mjs';
+import { migrateVault, seedVault } from './seed.mjs';
+import { connectorStatus } from './connectors.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 8787);
@@ -25,6 +26,7 @@ const VAULT_KEY = process.env.VAULT_KEY || 'vault-dev-key';
 
 const store = new VaultStore(process.env.VAULT_DATA || path.join(__dirname, 'data', 'vault.json'));
 seedVault(store);
+migrateVault(store);
 const presence = new PresenceRegistry();
 
 const app = express();
@@ -40,6 +42,10 @@ app.get('/api/health', (_req, res) => res.json({ ok: true }));
 app.get('/api/models', async (req, res) => {
   if (req.query.key !== VAULT_KEY) return res.status(401).json({ error: 'bad vault key' });
   res.json({ providers: await listProviders() });
+});
+app.get('/api/connectors', async (req, res) => {
+  if (req.query.key !== VAULT_KEY) return res.status(401).json({ error: 'bad vault key' });
+  res.json({ connectors: await connectorStatus(store) });
 });
 
 const dist = path.join(__dirname, '..', 'dist');

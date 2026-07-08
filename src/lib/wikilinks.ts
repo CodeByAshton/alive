@@ -40,12 +40,9 @@ export function buildGraph(records: Map<string, VaultRecord>): GraphData {
   const links: GraphData['links'] = [];
 
   for (const rec of records.values()) {
+    if (rec.path.startsWith('.')) continue;
     if (rec.type === 'file' && rec.path.endsWith('.md') && !rec.path.startsWith('chats/')) {
-      nodes.set(rec.path, {
-        id: rec.path,
-        label: basename(rec.path),
-        kind: rec.path.startsWith('skills/') ? 'skill' : 'note',
-      });
+      nodes.set(rec.path, { id: rec.path, label: basename(rec.path), kind: 'note' });
     }
     if (rec.type === 'folder' && /^chats\/[^/]+$/.test(rec.path)) {
       nodes.set(rec.path, { id: rec.path, label: rec.path.slice(6), kind: 'chat' });

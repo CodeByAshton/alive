@@ -111,7 +111,7 @@ export function Chat({ compact = false }: { compact?: boolean }) {
   const attachable = useMemo(
     () =>
       [...records.values()]
-        .filter((r) => r.type === 'file' && r.path.endsWith('.md') && !r.path.startsWith('chats/'))
+        .filter((r) => r.type === 'file' && r.path.endsWith('.md') && !r.path.startsWith('chats/') && !r.path.startsWith('.'))
         .sort((a, b) => b.mtime - a.mtime)
         .slice(0, 15),
     [records]

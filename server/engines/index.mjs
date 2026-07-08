@@ -84,7 +84,7 @@ export async function listProviders() {
 function createMockEngine() {
   return {
     id: 'mock',
-    async run({ messages, tools, executeTool, onEvent }) {
+    async run({ system, messages, tools, executeTool, onEvent }) {
       const last = messages[messages.length - 1]?.content ?? '';
       const toolsUsed = [];
       const say = async (text) => {
@@ -95,13 +95,43 @@ function createMockEngine() {
         return text;
       };
 
+      // Diagnostics: prove the harness wires skills/instructions into the
+      // turn without needing a real model.
+      if (/^\//.test(last.trim())) {
+        const skillMatch = (system || '').match(/invoked the "([^"]+)" skill/);
+        const text = await say(
+          skillMatch
+            ? `Skill loaded: ${skillMatch[1]} — following its instructions.`
+            : `No skill matches ${last.trim().split(/\s/)[0]}.`
+        );
+        return { text, toolsUsed };
+      }
+      if (/^diagnostic: agent-file/i.test(last.trim())) {
+        const has = (system || '').includes('.vault/AGENT.md');
+        const text = await say(`agent-file: ${has ? 'yes' : 'no'}`);
+        return { text, toolsUsed };
+      }
+
       // Deterministic behaviors so tests can exercise the tool loop.
       const noteMatch = last.match(/create (?:a )?note (?:called |named )?["']?([\w./ -]+?)["']?(?: with content ["'](.+?)["'])?$/i);
       const cmdMatch = last.match(/run (?:the )?command[: ]+(.+)$/i);
+      const connectorMatch = last.match(/connector .*?say (.+)$/i);
+      const connectorTool = tools.find((t) => t.name.startsWith('c_'));
       const canWrite = tools.some((t) => t.name === 'create_note');
       const canExec = tools.some((t) => t.name === 'run_command');
       let text = '';
-      if (cmdMatch && canExec) {
+      if (connectorMatch && connectorTool) {
+        onEvent({ type: 'tool_start', name: connectorTool.name, input: { text: connectorMatch[1] } });
+        toolsUsed.push(connectorTool.name);
+        try {
+          const output = await executeTool(connectorTool.name, { text: connectorMatch[1] });
+          onEvent({ type: 'tool_result', name: connectorTool.name, ok: true });
+          text = await say(`The connector says: ${String(output).slice(0, 300)}`);
+        } catch (err) {
+          onEvent({ type: 'tool_result', name: connectorTool.name, ok: false });
+          text = await say(`The connector didn't answer: ${err.message}`);
+        }
+      } else if (cmdMatch && canExec) {
         onEvent({ type: 'tool_start', name: 'run_command', input: { command: cmdMatch[1] } });
         toolsUsed.push('run_command');
         try {

@@ -7,7 +7,7 @@ export function seedVault(store) {
   const put = (path, content) => store.put({ path, type: 'file', content });
 
   put(
-    'AGENT.md',
+    '.vault/AGENT.md',
     `# AGENT.md
 
 Standing instructions for the assistant. This file is loaded into every turn — edit it to shape how the assistant behaves in this vault (like a CLAUDE.md).
@@ -75,7 +75,7 @@ Every Sunday: review [[Ideas]], prune the [[Reading List]], plan the week.
   );
 
   put(
-    'skills/summarize.md',
+    '.vault/skills/summarize.md',
     `---
 name: Summarize
 trigger: /summarize
@@ -87,7 +87,7 @@ Summarize the subject the user points at (a note path, a [[wikilink]], or the re
   );
 
   put(
-    'skills/journal.md',
+    '.vault/skills/journal.md',
     `---
 name: Journal
 trigger: /journal
@@ -99,7 +99,7 @@ Take the user's text after the command as a journal entry. If writing tools are 
   );
 
   put(
-    'skills/task.md',
+    '.vault/skills/task.md',
     `---
 name: Task
 trigger: /task
@@ -111,4 +111,15 @@ Capture the text after the command as a task. If writing tools are available, ap
   );
 
   store.put({ path: 'chats', type: 'folder' });
+}
+
+// Move pre-.vault layouts into the hidden system namespace.
+export function migrateVault(store) {
+  if (store.get('AGENT.md') && !store.get('.vault/AGENT.md')) {
+    store.move('AGENT.md', '.vault/AGENT.md');
+  }
+  const legacySkills = store.list('skills').filter((r) => r.type === 'file');
+  if (legacySkills.length && !store.list('.vault/skills').length) {
+    store.move('skills', '.vault/skills');
+  }
 }

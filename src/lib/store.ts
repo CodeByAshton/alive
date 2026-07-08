@@ -9,8 +9,8 @@ interface VaultState {
   providers: Provider[];
   activePath: string | null; // file open in the editor
   activeChat: string | null; // chat folder open in the chat pane
-  railTab: 'files' | 'chats' | 'skills' | 'devices';
-  mainView: 'chat' | 'note' | 'graph';
+  railTab: 'files' | 'chats' | 'devices';
+  mainView: 'chat' | 'note' | 'graph' | 'skills' | 'connectors';
   editorMode: 'read' | 'edit';
   streams: Map<string, StreamState>;
 
@@ -21,8 +21,8 @@ interface VaultState {
   setProviders: (providers: Provider[]) => void;
   setActivePath: (path: string | null) => void;
   setActiveChat: (path: string | null) => void;
-  setRailTab: (tab: 'files' | 'chats' | 'skills' | 'devices') => void;
-  setMainView: (view: 'chat' | 'note' | 'graph') => void;
+  setRailTab: (tab: 'files' | 'chats' | 'devices') => void;
+  setMainView: (view: 'chat' | 'note' | 'graph' | 'skills' | 'connectors') => void;
   setEditorMode: (mode: 'read' | 'edit') => void;
   openFile: (path: string, mode?: 'read' | 'edit') => void;
   updateStream: (chatPath: string, fn: (s: StreamState) => StreamState) => void;

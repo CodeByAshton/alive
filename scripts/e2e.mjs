@@ -29,7 +29,7 @@ await desktop.waitForSelector('.sidebar', { timeout: 15000 });
 // 1. Vault tree with seeded notes
 await desktop.waitForSelector('.tree-row', { timeout: 10000 });
 const treeText = await desktop.locator('.tree').innerText();
-check('desktop sees seeded vault tree', treeText.includes('Welcome') && treeText.includes('skills'));
+check('desktop sees seeded vault tree', treeText.includes('Welcome') && treeText.includes('notes'));
 
 // 2. Graph is a full-screen view reachable from the sidebar menu
 await desktop.locator('.nav-item[title="Graph"]').click();
@@ -61,13 +61,36 @@ const propContent = await desktop.evaluate(async () => {
 });
 check('properties editor writes YAML frontmatter', propContent.startsWith('---') && propContent.includes('status: draft'), propContent.split('\n').slice(0, 4).join(' | '));
 
-// 4. Rail panels: skills panel lists seeded skills
-await desktop.locator('.nav-item[title="Skills"]').click();
-const skillsText = await desktop.locator('.panel-list').innerText();
-check('skills panel lists vault skills', skillsText.includes('/summarize') && skillsText.includes('/journal'));
+// 4. Customize (hover dropdown) -> Skills opens the full-screen skills manager
+await desktop.locator('.nav-item[title="Customize"]').hover();
+await desktop.locator('.customize-menu [role="menuitem"]', { hasText: 'Skills' }).click();
+await desktop.waitForSelector('.skills-view', { timeout: 5000 });
+const skillsText = await desktop.locator('.skills-view').innerText();
+check('skills manager lists vault skills', skillsText.includes('/summarize') && skillsText.includes('/journal'));
+check('skills folder hidden from file tree', !(await desktop.locator('.tree').innerText()).includes('skills'));
 
 // --- Device 2: phone (separate context = genuinely separate storage/device) ---
 const phoneCtx = await browser.newContext({ viewport: { width: 390, height: 800 } });
+await phoneCtx.addInitScript(() => {
+  // Stub STT/TTS so the voice pipeline runs headless: the mic yields a fixed
+  // transcript; spoken replies are recorded on window.__spoken.
+  window.__spoken = [];
+  // window.speechSynthesis is a read-only getter — patch its methods instead.
+  const ss = window.speechSynthesis;
+  ss.cancel = () => {};
+  ss.speak = (u) => { window.__spoken.push(u.text); };
+  window.SpeechRecognition = window.webkitSpeechRecognition = class {
+    start() {
+      setTimeout(() => {
+        const result = [{ transcript: 'run command echo voice-pipeline-ok' }];
+        result.isFinal = true;
+        if (this.onresult) this.onresult({ results: [result] });
+        if (this.onend) this.onend();
+      }, 250);
+    }
+    stop() { if (this.onend) this.onend(); }
+  };
+});
 const phone = await phoneCtx.newPage();
 phone.on('pageerror', (e) => console.log('phone pageerror:', e.message));
 await phone.goto(`${BASE}/?surface=phone`);
@@ -161,7 +184,36 @@ await phone.locator('.composer .send').click();
 await phone.waitForTimeout(3000);
 lastReply = await phone.locator('.bubble.assistant').last().innerText();
 check('node harness online: assistant runs the command', lastReply.includes('vault-node-ok') && lastReply.includes('Ran it'), lastReply.slice(0, 90));
+
+// 13a. VOICE PIPELINE: speak on the phone -> command executes on the laptop
+// node -> reply is spoken back (TTS). STT/TTS stubbed; everything between is real.
+await phone.locator('.phone-voice .mic').click();
+await phone.waitForTimeout(3500);
+lastReply = await phone.locator('.bubble.assistant').last().innerText();
+const spoken = await phone.evaluate(() => window.__spoken);
+check('voice: spoken request runs on the connected machine', lastReply.includes('voice-pipeline-ok'), lastReply.slice(0, 70));
+check('voice: assistant reply is spoken back (TTS)', Array.isArray(spoken) && spoken.some((t) => t.includes('Ran it')), (spoken || []).join(' | ').slice(0, 60));
 node.kill();
+
+// 13b. CONNECTORS: an MCP server plugged in via Customize -> Connectors
+const mcp = spawn(process.execPath, ['scripts/mock-mcp.mjs'], { stdio: 'pipe', env: { ...process.env, PORT: '8975' } });
+await phone.waitForTimeout(800);
+await desktop2.locator('.nav-item[title="Customize"]').hover();
+await desktop2.locator('.customize-menu [role="menuitem"]', { hasText: 'Connectors' }).click();
+await desktop2.waitForSelector('.connectors-view', { timeout: 5000 });
+await desktop2.locator('.connectors-view button', { hasText: 'New' }).click();
+await desktop2.waitForSelector('.connectors-view input[placeholder="https…"], .connectors-view input[placeholder="https…"]', { timeout: 3000 }).catch(() => {});
+await desktop2.locator('.connectors-view input').nth(1).fill('http://localhost:8975/mcp');
+await desktop2.waitForTimeout(1200); // debounce save + status refresh
+const connectorPanel = await desktop2.locator('.connectors-view').innerText();
+check('connector discovers MCP tools', connectorPanel.includes('echo'), connectorPanel.slice(0, 120));
+
+await phone.locator('.composer textarea').fill('use the connector to say hello-world');
+await phone.locator('.composer .send').click();
+await phone.waitForTimeout(3000);
+lastReply = await phone.locator('.bubble.assistant').last().innerText();
+check('assistant calls connector tool end-to-end', lastReply.includes('echo: hello-world'), lastReply.slice(0, 80));
+mcp.kill();
 
 // 14. Message files carry frontmatter with device + model provenance
 const chatFolderCheck = await desktop2.evaluate(async () => {
@@ -176,12 +228,25 @@ check(
   chatFolderCheck.split('\n').slice(0, 6).join(' | ')
 );
 
-// 15. Skill invocation via slash command
-await phone.locator('.composer textarea').fill('/task buy milk');
+// 15. Skill awareness: the harness loads the right skill from .vault/skills
+await phone.locator('.composer textarea').fill('/journal morning pages');
 await phone.locator('.composer .send').click();
 await phone.waitForTimeout(2000);
 const afterSkill = await phone.locator('.bubble.assistant').last().innerText();
-check('slash-command skill turn completes', afterSkill.length > 0);
+check('harness loads the invoked skill into the turn', afterSkill.includes('Skill loaded: Journal'), afterSkill.slice(0, 60));
+
+await phone.locator('.composer textarea').fill('/nope not-a-skill');
+await phone.locator('.composer .send').click();
+await phone.waitForTimeout(2000);
+const noSkill = await phone.locator('.bubble.assistant').last().innerText();
+check('unknown slash command loads no skill', noSkill.includes('No skill matches'), noSkill.slice(0, 60));
+
+// 15b. Standing instructions (.vault/AGENT.md) reach every turn
+await phone.locator('.composer textarea').fill('diagnostic: agent-file');
+await phone.locator('.composer .send').click();
+await phone.waitForTimeout(2000);
+const agentDiag = await phone.locator('.bubble.assistant').last().innerText();
+check('AGENT.md standing instructions injected into turns', agentDiag.includes('agent-file: yes'), agentDiag.slice(0, 40));
 
 // 16. Reload persistence: reload phone, conversation still there
 await phone.reload();
@@ -190,6 +255,8 @@ const reloaded = await phone.locator('.chat-scroll').innerText();
 check('reload restores conversation from cache+cloud', reloaded.includes('Device Probe'));
 
 // 17. Model picker lists multiple providers
+await desktop2.locator('.nav-item[title="Chats"]').click();
+await desktop2.waitForSelector('.model-picker', { timeout: 5000 });
 await desktop2.locator('.model-picker').click();
 await desktop2.waitForSelector('[role="listbox"]', { timeout: 5000 });
 const pickerText = await desktop2.locator('[role="listbox"]').innerText();

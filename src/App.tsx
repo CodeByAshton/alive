@@ -9,6 +9,8 @@ import { Chat } from './components/Chat';
 import { Graph } from './components/Graph';
 import { Phone } from './components/Phone';
 import { Connect } from './components/Connect';
+import { SkillsView } from './components/SkillsView';
+import { ConnectorsView } from './components/ConnectorsView';
 
 function useSize<T extends HTMLElement>() {
   const ref = useRef<T>(null);
@@ -46,6 +48,8 @@ function Desktop() {
           {mainView === 'chat' && <Chat />}
           {mainView === 'note' && <Editor />}
           {mainView === 'graph' && <GraphView />}
+          {mainView === 'skills' && <SkillsView />}
+          {mainView === 'connectors' && <ConnectorsView />}
         </section>
       </main>
     </div>
