@@ -22,9 +22,27 @@ export class VaultStore extends EventEmitter {
       const raw = JSON.parse(fs.readFileSync(this.dataFile, 'utf8'));
       this.rev = raw.rev || 0;
       for (const rec of raw.records || []) this.records.set(rec.path, rec);
+      if (this._compactTombstones().length) this._scheduleSave();
     } catch {
       /* fresh vault */
     }
+  }
+
+  // Tombstones exist so sync cursors learn about deletes; a client that has
+  // been offline longer than this re-syncs from rev 0 anyway (its cache is
+  // stale beyond trusting), so old tombstones are just dead weight. Compact
+  // at boot. Returns the dropped paths.
+  static TOMBSTONE_TTL = 30 * 24 * 60 * 60 * 1000;
+  _compactTombstones() {
+    const cutoff = Date.now() - VaultStore.TOMBSTONE_TTL;
+    const dropped = [];
+    for (const [p, rec] of this.records) {
+      if (rec.deleted && rec.mtime < cutoff) {
+        this.records.delete(p);
+        dropped.push(p);
+      }
+    }
+    return dropped;
   }
 
   _scheduleSave() {

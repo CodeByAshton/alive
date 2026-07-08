@@ -346,6 +346,7 @@ export function Sidebar() {
   const mainView = useVault((s) => s.mainView);
   const setMainView = useVault((s) => s.setMainView);
   const connected = useVault((s) => s.connected);
+  const pendingWrites = useVault((s) => s.pendingWrites);
   const presence = useVault((s) => s.presence);
   const openFile = useVault((s) => s.openFile);
   const setActiveChat = useVault((s) => s.setActiveChat);
@@ -391,8 +392,17 @@ export function Sidebar() {
         <span className="text-sm font-semibold tracking-tight">Vault</span>
         <span
           className={cn('sync-dot size-1.5 rounded-full', connected ? 'on bg-neutral-800' : 'off bg-neutral-300')}
-          title={connected ? 'Synced' : 'Offline'}
+          title={
+            connected
+              ? 'Synced'
+              : pendingWrites
+                ? `Offline — ${pendingWrites} change${pendingWrites === 1 ? '' : 's'} waiting to sync`
+                : 'Offline'
+          }
         />
+        {!connected && pendingWrites > 0 && (
+          <span className="pending-count font-mono text-[10px] text-neutral-400">{pendingWrites}</span>
+        )}
         <span className="flex-1" />
         <Tooltip>
           <TooltipTrigger asChild>

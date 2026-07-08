@@ -16,6 +16,7 @@ interface VaultState {
   approvals: ApprovalRequest[];
   paused: boolean;
   mode: AssistantMode;
+  pendingWrites: number; // offline outbox depth
 
   applyRecords: (records: VaultRecord[]) => void;
   setPresence: (devices: Device[]) => void;
@@ -34,6 +35,7 @@ interface VaultState {
   removeApproval: (id: string) => void;
   setPaused: (paused: boolean) => void;
   setMode: (mode: AssistantMode) => void;
+  setPendingWrites: (n: number) => void;
 }
 
 const emptyStream = (): StreamState => ({ active: false, text: '', tools: [] });
@@ -53,6 +55,7 @@ export const useVault = create<VaultState>((set) => ({
   approvals: [],
   paused: false,
   mode: 'ask',
+  pendingWrites: 0,
 
   applyRecords: (incoming) =>
     set((state) => {
@@ -98,4 +101,5 @@ export const useVault = create<VaultState>((set) => ({
   removeApproval: (id) => set((state) => ({ approvals: state.approvals.filter((a) => a.id !== id) })),
   setPaused: (paused) => set({ paused }),
   setMode: (mode) => set({ mode }),
+  setPendingWrites: (pendingWrites) => set({ pendingWrites }),
 }));

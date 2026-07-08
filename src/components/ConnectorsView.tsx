@@ -8,6 +8,13 @@ import { Cable, CircleAlert, CircleCheck, Loader2, Plus, RefreshCw, Trash2 } fro
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import { useVault } from '../lib/store';
@@ -54,7 +61,7 @@ export function ConnectorsView() {
 
   const createConnector = async () => {
     const path = newConnectorPath(records);
-    await saveConnector({ path, name: 'New connector', url: '', token: '', enabled: true });
+    await saveConnector({ path, name: 'New connector', url: '', token: '', enabled: true, policy: 'ask' });
     setSelectedPath(path);
   };
 
@@ -209,6 +216,24 @@ function ConnectorEditor({
               className="font-mono"
               onChange={(e) => update({ token: e.target.value.trim() })}
             />
+          </Field>
+          <Field
+            label="Permission"
+            hint={
+              draft.policy === 'ask'
+                ? 'Every tool call waits for your approval on-screen.'
+                : 'Trusted — its tools run without asking.'
+            }
+          >
+            <Select value={draft.policy} onValueChange={(policy) => update({ policy: policy as Connector['policy'] })}>
+              <SelectTrigger size="sm" className="connector-policy w-40 bg-white">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ask">Ask first</SelectItem>
+                <SelectItem value="auto">Trusted</SelectItem>
+              </SelectContent>
+            </Select>
           </Field>
 
           <div className="connector-status rounded-xl border bg-neutral-50/60 px-4 py-3">

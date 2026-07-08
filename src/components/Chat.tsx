@@ -64,14 +64,15 @@ function StatusLine({ stream }: { stream: StreamState }) {
   );
 }
 
-// Voice-initiated, screen-confirmed: a command the assistant wants to run on
-// your computer waits here until a human on any device approves it.
-function ApprovalCard({ id, command }: { id: string; command: string }) {
+// Voice-initiated, screen-confirmed: an action the assistant wants to take
+// (a command on your computer, or a connector acting on an external service)
+// waits here until a human on any device approves it.
+function ApprovalCard({ id, command, kind }: { id: string; command: string; kind: 'command' | 'connector' }) {
   return (
     <div className="approval-card flex max-w-[86%] flex-col gap-2.5 self-start rounded-2xl border bg-white p-3.5 shadow-xs animate-in fade-in-0 slide-in-from-bottom-1">
       <div className="flex items-center gap-2 text-[12.5px] font-medium text-neutral-800">
         <ShieldCheck className="size-4 text-neutral-500" />
-        Run this command on your computer?
+        {kind === 'connector' ? 'Let this connector act?' : 'Run this command on your computer?'}
       </div>
       <code className="block overflow-x-auto rounded-lg border bg-neutral-50 px-3 py-2 font-mono text-[12px] whitespace-pre text-neutral-700">
         {command}
@@ -243,7 +244,7 @@ export function Chat({ compact = false }: { compact?: boolean }) {
         ))}
 
         {approvals.map((a) => (
-          <ApprovalCard key={a.id} id={a.id} command={a.command} />
+          <ApprovalCard key={a.id} id={a.id} command={a.command} kind={a.kind} />
         ))}
 
         {stream && (stream.active || stream.error) && (

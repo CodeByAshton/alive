@@ -196,8 +196,13 @@ function loadSkill(store, text) {
   return null;
 }
 
+// Replay caps: long threads replay the most recent turns, not everything —
+// bounded by message count and a rough character budget (chars ≈ tokens*4).
+const MAX_REPLAY_MESSAGES = 40;
+const MAX_REPLAY_CHARS = 60_000;
+
 function readConversation(store, chatPath) {
-  return store
+  const all = store
     .list(chatPath)
     .filter((r) => r.type === 'file' && r.path.endsWith('.md') && r.path !== `${chatPath}/index.md`)
     .sort((a, b) => (a.path < b.path ? -1 : 1))
@@ -206,6 +211,16 @@ function readConversation(store, chatPath) {
       return { role: data.role === 'assistant' ? 'assistant' : 'user', content: body.trim() };
     })
     .filter((m) => m.content);
+
+  let kept = all.slice(-MAX_REPLAY_MESSAGES);
+  let chars = kept.reduce((n, m) => n + m.content.length, 0);
+  while (kept.length > 2 && chars > MAX_REPLAY_CHARS) {
+    chars -= kept[0].content.length;
+    kept = kept.slice(1);
+  }
+  // Providers expect the thread to open with a user turn.
+  while (kept.length && kept[0].role !== 'user') kept = kept.slice(1);
+  return { messages: kept, omitted: all.length - kept.length };
 }
 
 function nextSeq(store, chatPath) {
@@ -254,12 +269,13 @@ function vaultOutline(store) {
     .list()
     .filter((r) => !r.path.startsWith('chats/'))
     .map((r) => (r.type === 'folder' ? r.path + '/' : r.path))
-    .sort()
-    .slice(0, 200);
-  return paths.join('\n');
+    .sort();
+  const shown = paths.slice(0, 200);
+  if (paths.length > shown.length) shown.push(`… (+${paths.length - shown.length} more — use list_files)`);
+  return shown.join('\n');
 }
 
-export async function runTurn({ store, presence, chatPath, text, deviceType, provider, model, broadcast, execRemote }) {
+export async function runTurn({ store, presence, chatPath, text, deviceType, provider, model, broadcast, execRemote, approveConnector }) {
   chatPath = sanitizePath(chatPath);
   const timestamp = new Date().toISOString();
 
@@ -279,10 +295,14 @@ export async function runTurn({ store, presence, chatPath, text, deviceType, pro
   // plus tools contributed by enabled connectors (external MCP servers).
   const tools = [...assembleTools(presence), ...(await connectorToolDefs(store))];
 
-  // 4. Rebuild the conversation from the chat folder records.
-  const messages = readConversation(store, chatPath);
+  // 4. Rebuild the conversation from the chat folder records (recent turns
+  // only — see the replay caps above).
+  const { messages, omitted } = readConversation(store, chatPath);
 
   let system = SYSTEM_PROMPT + `\n\nCurrent vault contents (paths):\n${vaultOutline(store) || '(empty)'}`;
+  if (omitted > 0) {
+    system += `\n\nThis is a long-running conversation: the ${omitted} earliest messages are not replayed here. The full transcript lives in the vault under ${chatPath}/ — read those files if you need the earlier context.`;
+  }
 
   // Standing vault instructions — the CLAUDE.md of this vault. User-editable,
   // loaded into every turn.
@@ -311,7 +331,7 @@ export async function runTurn({ store, presence, chatPath, text, deviceType, pro
   const filesTouched = [];
   const baseExecutor = makeToolExecutor(store, execRemote);
   const trackingExecutor = async (name, input) => {
-    if (isConnectorTool(name)) return executeConnectorTool(store, name, input);
+    if (isConnectorTool(name)) return executeConnectorTool(store, name, input, approveConnector);
     const result = await baseExecutor(name, input);
     if (['create_note', 'edit_note', 'append_note'].includes(name) && input?.path) {
       filesTouched.push(sanitizePath(input.path));

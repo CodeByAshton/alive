@@ -1,9 +1,10 @@
 // Connectors: external MCP servers declared as records under
 // .vault/connectors/. Enabled connectors contribute their tools to the
 // assistant's per-turn toolset (namespaced), executed via the MCP client.
-// TODO: trust boundary — connector URLs and tokens are user-supplied; a real
-// version needs scoped permissions per connector and an approval step before
-// a connector tool can act.
+// Each connector carries a permission policy: 'ask' (default) confirms every
+// tool call on-screen before it runs; 'auto' marks the connector trusted.
+// The vault's global Auto mode also bypasses asks, consistent with commands.
+// TODO: trust boundary — tokens are stored in vault records; encrypt at rest.
 
 import { parseFrontmatter } from '../shared/frontmatter.mjs';
 import { callTool, listTools } from './mcp.mjs';
@@ -25,6 +26,7 @@ export function readConnectors(store) {
         url: String(data.url || ''),
         token: data.token ? String(data.token) : '',
         enabled: data.enabled !== false,
+        policy: data.policy === 'auto' ? 'auto' : 'ask',
       };
     })
     .filter((c) => c.url);
@@ -68,11 +70,15 @@ export function isConnectorTool(name) {
   return name.startsWith(TOOL_PREFIX) && name.includes('__');
 }
 
-export async function executeConnectorTool(store, name, input) {
+export async function executeConnectorTool(store, name, input, approve) {
   const [slug, ...rest] = name.slice(TOOL_PREFIX.length).split('__');
   const toolName = rest.join('__');
   const connector = readConnectors(store).find((c) => c.slug === slug && c.enabled);
   if (!connector) throw new Error(`No enabled connector for ${name}`);
+  if (connector.policy === 'ask' && approve) {
+    const ok = await approve({ connectorName: connector.name, toolName, input });
+    if (!ok) throw new Error(`The user declined the ${connector.name} action.`);
+  }
   return callTool(connector.url, connector.token, toolName, input);
 }
 

@@ -11,6 +11,7 @@ import { Phone } from './components/Phone';
 import { Connect } from './components/Connect';
 import { SkillsView } from './components/SkillsView';
 import { ConnectorsView } from './components/ConnectorsView';
+import { CommandPalette } from './components/CommandPalette';
 
 function useSize<T extends HTMLElement>() {
   const ref = useRef<T>(null);
@@ -52,6 +53,7 @@ function Desktop() {
           {mainView === 'connectors' && <ConnectorsView />}
         </section>
       </main>
+      <CommandPalette />
     </div>
   );
 }

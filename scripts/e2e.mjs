@@ -265,12 +265,66 @@ await desktop2.waitForTimeout(1200); // debounce save + status refresh
 const connectorPanel = await desktop2.locator('.connectors-view').innerText();
 check('connector discovers MCP tools', connectorPanel.includes('echo'), connectorPanel.slice(0, 120));
 
+// New connectors default to the 'ask' policy: every tool call is
+// screen-confirmed, same as commands.
 await phone.locator('.composer textarea').fill('use the connector to say hello-world');
 await phone.locator('.composer .send').click();
+const connectorAsked = await phone
+  .waitForSelector('.approval-card', { timeout: 8000 })
+  .then(() => true)
+  .catch(() => false);
+check('connector call waits for approval (ask policy)', connectorAsked);
+await phone.locator('.approval-card .approve').click();
 await phone.waitForTimeout(3000);
 lastReply = await phone.locator('.bubble.assistant').last().innerText();
 check('assistant calls connector tool end-to-end', lastReply.includes('echo: hello-world'), lastReply.slice(0, 80));
+
+// Mark the connector Trusted -> its tools run without asking.
+await desktop2.locator('.connector-policy').click();
+await desktop2.locator('[role="option"]', { hasText: 'Trusted' }).click();
+await desktop2.waitForTimeout(1200); // debounce save
+await phone.locator('.composer textarea').fill('use the connector to say trusted-run');
+await phone.locator('.composer .send').click();
+await phone.waitForTimeout(3000);
+lastReply = await phone.locator('.bubble.assistant').last().innerText();
+const trustedCards = await phone.locator('.approval-card').count();
+check('trusted connector runs without asking', lastReply.includes('echo: trusted-run') && trustedCards === 0, lastReply.slice(0, 80));
 mcp.kill();
+
+// 13f. CMD-K: search palette finds notes and opens them full-screen.
+await desktop2.keyboard.press('Control+k');
+await desktop2.waitForSelector('.command-palette', { timeout: 5000 });
+await desktop2.locator('.command-palette input').fill('Welcome');
+await desktop2.waitForTimeout(400);
+const paletteText = await desktop2.locator('.command-palette').innerText();
+check('cmd-k palette finds the note', paletteText.includes('Welcome'));
+await desktop2.locator('.command-palette input').press('Enter');
+await desktop2.waitForSelector('.editor-modes', { timeout: 5000 });
+check('cmd-k opens the note full-screen', (await desktop2.locator('.main-card').innerText()).includes('Welcome'));
+
+// 13g. EXPORT: the whole vault downloads as a valid zip.
+const exportHead = await desktop2.evaluate(async () => {
+  const res = await fetch('/api/export?key=vault-dev-key');
+  const buf = new Uint8Array(await res.arrayBuffer());
+  return { status: res.status, magic: String.fromCharCode(buf[0], buf[1]), size: buf.length };
+});
+check('vault exports as a zip', exportHead.status === 200 && exportHead.magic === 'PK' && exportHead.size > 500, JSON.stringify(exportHead));
+
+// 13h. CONFLICT COPIES: a write that loses last-write-wins is preserved as a
+// conflicted copy instead of silently vanishing (raw WS = a stale device).
+const { default: RawWS } = await import('ws');
+const rawWs = new RawWS('ws://localhost:8787/ws?key=vault-dev-key&deviceId=e2e-stale&deviceType=desktop');
+await new Promise((resolve) => rawWs.on('open', resolve));
+const nowMs = Date.now();
+rawWs.send(JSON.stringify({ type: 'put', record: { path: 'notes/Conflict.md', type: 'file', content: 'winning edit', mtime: nowMs } }));
+await new Promise((r) => setTimeout(r, 300));
+rawWs.send(JSON.stringify({ type: 'put', record: { path: 'notes/Conflict.md', type: 'file', content: 'stale offline edit', mtime: nowMs - 60_000 } }));
+await new Promise((r) => setTimeout(r, 800));
+rawWs.close();
+await desktop2.locator('.nav-item[title="Files"]').click();
+await desktop2.waitForTimeout(800);
+const treeAfterConflict = await desktop2.locator('.tree').innerText();
+check('losing write becomes a conflicted copy', treeAfterConflict.includes('conflicted copy'), treeAfterConflict.split('\n').find((l) => l.includes('conflicted')) ?? '');
 
 // 14. Message files carry frontmatter with device + model provenance
 const chatFolderCheck = await desktop2.evaluate(async () => {

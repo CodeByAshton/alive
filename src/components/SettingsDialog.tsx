@@ -5,7 +5,7 @@
 // device, Claude-style: confirm each command, run unattended, or read-only.
 
 import { useEffect, useState } from 'react';
-import { Settings } from 'lucide-react';
+import { Download, Settings } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -27,6 +27,8 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { useVault } from '../lib/store';
 import { putRecord, setAssistantMode } from '../lib/sync';
+import { getServerConfig } from '../lib/config';
+import { getVaultKey } from '../lib/device';
 import type { AssistantMode } from '../lib/types';
 
 const AGENT_PATH = '.vault/AGENT.md';
@@ -102,11 +104,25 @@ export function SettingsDialog() {
           </p>
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>
-            Cancel
+        <DialogFooter className="items-center sm:justify-between">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="export-vault text-neutral-500"
+            title="Download the whole vault as a zip of Markdown files"
+            onClick={() => {
+              const server = getServerConfig();
+              if (server) window.open(`${server.httpBase}/api/export?key=${encodeURIComponent(getVaultKey())}`, '_blank');
+            }}
+          >
+            <Download className="size-3.5" /> Export vault
           </Button>
-          <Button onClick={save}>Save</Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={save}>Save</Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

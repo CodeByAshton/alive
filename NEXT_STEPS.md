@@ -1,7 +1,7 @@
 # Next steps → production
 
 Working checklist for upcoming sessions. State of the world: the prototype is feature-complete and
-covered by `npm run e2e` (30 checks, keyless via the mock engine). Everything below is what stands
+covered by `npm run e2e` (36 checks, keyless via the mock engine). Everything below is what stands
 between this and something strangers can download and trust.
 
 ## 1. Validate the real model path (first — everything else builds on it)
@@ -9,7 +9,8 @@ between this and something strangers can download and trust.
 - [ ] Smoke-test OpenAI / Gemini / Ollama through the OpenAI-compat engine (tool-call deltas, no-tools degradation)
 - [ ] Verify model switching mid-thread with two real providers
 - [ ] Add an e2e job that runs against real providers when keys are present (skip otherwise)
-- [ ] Token/cost hygiene: cap conversation replay length, trim vault outline, consider prompt caching on the system prompt
+- [x] Token/cost hygiene: replay capped (40 messages / ~60k chars, with a pointer to the full
+      transcript in the vault), outline truncation marker, prompt caching on the Anthropic system block
 
 ## 2. Trust boundary (all the `// TODO: trust boundary` markers)
 - [ ] Replace the shared vault key with real auth (magic link or passkey; one vault per account)
@@ -22,7 +23,9 @@ between this and something strangers can download and trust.
 - [x] Command allowlist (`--allow git,npm,...`), workspace confinement, and a JSONL audit log of
       every exec (`~/.vault-node/audit.jsonl`) in the node harness
 - [x] Kill switch: pause the agent from any surface (Devices panel); per-device revocation still open
-- [ ] Scope connector tools (per-connector allow/ask policy); never log tokens; encrypt secrets at rest
+- [x] Scope connector tools: per-connector Ask first / Trusted policy, screen-confirmed through the
+      same approval cards as commands (vault-wide Auto mode bypasses, consistent with commands)
+- [ ] Encrypt connector tokens at rest (currently plain in vault records); never log tokens
 - [x] Rate limiting (token bucket per connection) + input size caps (2 MB WS payload, 1.5 MB file,
       32k turn text); CORS restrictable via `VAULT_ALLOWED_ORIGINS`
 
@@ -36,7 +39,8 @@ between this and something strangers can download and trust.
 - [ ] Supabase Realtime/Presence/Auth to replace the WS server for serverless deploys
       (single-writer server + WS remains the architecture until then)
 - [ ] Blob/attachment storage for non-Markdown files (images in notes)
-- [ ] Backups + export (zip of the vault = plain Markdown folder)
+- [x] Export: whole vault as a zip of plain Markdown (`/api/export`, button in Settings);
+      scheduled off-site backups still open
 - [x] Deploy story: one-container Dockerfile (client + API + WS) + `fly.toml`; README "Deploy"
       section covers secrets, CORS lockdown, and pointing devices at the deployed URL
 
@@ -56,15 +60,18 @@ between this and something strangers can download and trust.
 - [ ] TestFlight build → App Store listing (privacy manifest, review notes about the self-hosted server)
 
 ## 6. Sync robustness
-- [ ] Conflict UX beyond last-write-wins (at minimum: conflicted-copy files like Obsidian)
-- [ ] Outbox retry with backoff + offline indicator surfacing pending-write count
-- [ ] Compaction of tombstones; paginated initial sync for large vaults
+- [x] Conflict UX: a write that loses last-write-wins is saved as an Obsidian-style
+      "(conflicted copy …)" file instead of vanishing
+- [x] Offline indicator surfaces pending-write count (sync dot in the sidebar); outbox
+      already flushes on reconnect
+- [x] Tombstone compaction (30-day TTL at boot, both stores); paginated initial sync for
+      large vaults still open
 - [ ] Multi-tab same-device coordination (SharedWorker or leader election)
 
 ## 7. Product polish
 - [ ] Chat: stop/regenerate buttons, message actions (copy), day separators, unread state on other devices
 - [ ] Editor: live block-style editing (Notion-like) instead of raw-source Edit tab; drag-drop in tree
-- [ ] Search (cmd-K palette across notes + chats)
+- [x] Search (cmd-K palette across notes + chats, title + content, keyboard-driven)
 - [ ] Graph: local-graph mode for the open note, zoom controls
 - [ ] Connectors: OAuth flow for hosted MCP servers (Notion/Linear/etc.), per-tool toggles
 - [ ] Skills: template gallery; test-run a skill from the editor

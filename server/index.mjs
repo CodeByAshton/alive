@@ -14,6 +14,7 @@ import { runTurn } from './harness.mjs';
 import { listProviders } from './engines/index.mjs';
 import { migrateVault, seedVault } from './seed.mjs';
 import { connectorStatus } from './connectors.mjs';
+import { buildZip } from './zip.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 8787);
@@ -63,6 +64,19 @@ app.get('/api/models', async (req, res) => {
 app.get('/api/connectors', async (req, res) => {
   if (req.query.key !== VAULT_KEY) return res.status(401).json({ error: 'bad vault key' });
   res.json({ connectors: await connectorStatus(store) });
+});
+// Export: the whole vault as a zip of plain Markdown — the "your data is just
+// files" guarantee, downloadable. Chats and .vault system files included.
+app.get('/api/export', (req, res) => {
+  if (req.query.key !== VAULT_KEY) return res.status(401).json({ error: 'bad vault key' });
+  const files = store
+    .list()
+    .filter((r) => r.type === 'file')
+    .map((r) => ({ path: r.path, content: r.content, mtime: r.mtime }));
+  const stamp = new Date().toISOString().slice(0, 10);
+  res.set('Content-Type', 'application/zip');
+  res.set('Content-Disposition', `attachment; filename="vault-export-${stamp}.zip"`);
+  res.send(buildZip(files));
 });
 
 const dist = path.join(__dirname, '..', 'dist');
@@ -157,7 +171,7 @@ function setAssistantMode(mode) {
 const pendingApprovals = new Map(); // approvalId -> { resolve, timer }
 let approvalSeq = 0;
 
-function requestApproval({ chatPath, command, cwd }) {
+function requestApproval({ chatPath, command, cwd, kind = 'command' }) {
   return new Promise((resolve) => {
     const id = `appr-${++approvalSeq}`;
     const timer = setTimeout(() => {
@@ -166,7 +180,7 @@ function requestApproval({ chatPath, command, cwd }) {
       resolve(false);
     }, 60_000);
     pendingApprovals.set(id, { resolve, timer });
-    broadcast({ type: 'approval_request', id, chatPath, command, cwd: cwd ?? null });
+    broadcast({ type: 'approval_request', id, chatPath, command, cwd: cwd ?? null, kind });
   });
 }
 
@@ -243,13 +257,33 @@ wss.on('connection', (ws, req) => {
         case 'sync':
           ws.send(JSON.stringify({ type: 'records', records: store.since(msg.since ?? 0), rev: store.rev }));
           break;
-        case 'put':
+        case 'put': {
           if (typeof msg.record?.content === 'string' && msg.record.content.length > MAX_CONTENT) {
             ws.send(JSON.stringify({ type: 'error', error: 'file too large to sync (1.5 MB cap)' }));
             break;
           }
-          store.put(msg.record);
+          // Conflict copies, Obsidian-style: a write that loses last-write-wins
+          // (offline edit on one device, newer edit on another) is saved next
+          // to the winner instead of vanishing.
+          const rec = msg.record;
+          const existing = rec?.path ? store.get(rec.path) : null;
+          if (
+            existing &&
+            existing.type === 'file' &&
+            rec.type === 'file' &&
+            typeof rec.mtime === 'number' &&
+            existing.mtime > rec.mtime &&
+            typeof rec.content === 'string' &&
+            rec.content !== existing.content
+          ) {
+            const stamp = new Date(rec.mtime).toISOString().slice(0, 19).replace('T', ' ').replace(/:/g, '.');
+            const conflictPath = rec.path.replace(/(\.md)?$/, (ext) => ` (conflicted copy ${stamp})${ext || ''}`);
+            store.put({ path: conflictPath, type: 'file', content: rec.content });
+            break;
+          }
+          store.put(rec);
           break;
+        }
         case 'delete':
           store.delete(msg.path, msg.mtime);
           break;
@@ -312,6 +346,16 @@ wss.on('connection', (ws, req) => {
                   if (!approved) throw new Error('The user declined to run that command.');
                 }
                 return execRemote(name, input);
+              },
+              // Per-connector 'ask' policy routes through the same approval
+              // cards; the vault-wide Auto mode trusts everything.
+              approveConnector: async ({ connectorName, toolName }) => {
+                if (assistantMode === 'auto') return true;
+                return requestApproval({
+                  chatPath: msg.chatPath,
+                  kind: 'connector',
+                  command: `${connectorName}: ${toolName}`,
+                });
               },
             });
           } finally {

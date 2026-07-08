@@ -28,6 +28,7 @@ export async function startSync(): Promise<void> {
   const cached = await loadCachedRecords();
   useVault.getState().applyRecords(cached.filter((r) => !r.deleted));
   useVault.getState().setHydrated();
+  refreshPendingCount();
 
   fetch(`${server.httpBase}/api/models?key=${encodeURIComponent(vaultKey)}`)
     .then((r) => r.json())
@@ -61,6 +62,7 @@ function connect() {
       send(item.op as never);
       await db.outbox.delete(item.id!);
     }
+    await refreshPendingCount();
   };
 
   ws.onmessage = async (event) => {
@@ -79,7 +81,13 @@ function connect() {
         state.setMode(msg.mode);
         break;
       case 'approval_request':
-        state.addApproval({ id: msg.id, chatPath: msg.chatPath, command: msg.command, cwd: msg.cwd ?? null });
+        state.addApproval({
+          id: msg.id,
+          chatPath: msg.chatPath,
+          command: msg.command,
+          cwd: msg.cwd ?? null,
+          kind: msg.kind === 'connector' ? 'connector' : 'command',
+        });
         break;
       case 'approval_resolved':
         state.removeApproval(msg.id);
@@ -139,7 +147,14 @@ function send(op: Record<string, unknown>) {
 }
 
 async function sendOrQueue(op: Record<string, unknown>) {
-  if (!send(op)) await db.outbox.add({ op });
+  if (!send(op)) {
+    await db.outbox.add({ op });
+    await refreshPendingCount();
+  }
+}
+
+async function refreshPendingCount() {
+  useVault.getState().setPendingWrites(await db.outbox.count());
 }
 
 // ---- public write API (cache-first, then cloud) ----

@@ -2,6 +2,67 @@
 
 An AI-native workspace: an Obsidian-style vault that lives in the cloud, syncs in real time across genuinely separate devices, and has an assistant that is a first-class inhabitant of the vault — not a chat box bolted on.
 
+## Your next steps (no tech background needed)
+
+Everything below is copy-paste. You'll need the **Terminal** app (on a Mac: press `Cmd+Space`, type "Terminal", press Enter).
+
+**Step 1 — Run Vault on your computer.**
+Install Node.js first (go to [nodejs.org](https://nodejs.org), download, double-click, next-next-finish). Then in Terminal, inside this project's folder, paste:
+
+```bash
+npm install
+VAULT_ENABLE_MOCK=1 npm run dev
+```
+
+Open **http://localhost:5173** in your browser. That's Vault, running with a practice AI (no account needed). Leave the Terminal window open while you use it.
+
+**Step 2 — Plug in the real AI.**
+Create an API key at [console.anthropic.com](https://console.anthropic.com) (sign up → API Keys → Create Key → copy it). Then start Vault like this instead, pasting your key in place of the dots:
+
+```bash
+export ANTHROPIC_API_KEY=...
+npm run dev
+```
+
+**Step 3 — Make your vault permanent (Supabase).**
+Right now your notes live in a file on this computer. To keep them safe in your Supabase database instead: open your [Supabase dashboard](https://supabase.com/dashboard) → your project → **Project Settings** → **API Keys** → copy the **service_role** key (keep it secret — it's a master key). Then start Vault like this:
+
+```bash
+export SUPABASE_URL=https://tjwlmdadhtywffsoeulv.supabase.co
+export SUPABASE_SERVICE_KEY=...   # the service_role key you copied
+npm run smoke:supabase            # quick health check — should say PASS on every line
+npm run dev
+```
+
+The database tables are already set up. Once this works, your vault survives anything happening to this computer.
+
+**Step 4 — Put it on the internet (so your phone works anywhere).**
+This uses Fly.io (has a free tier). Install their tool from [fly.io/docs/flyctl/install](https://fly.io/docs/flyctl/install/), then:
+
+```bash
+fly launch --copy-config --no-deploy
+fly secrets set VAULT_KEY=pick-a-long-secret-password SUPABASE_URL=https://tjwlmdadhtywffsoeulv.supabase.co SUPABASE_SERVICE_KEY=... ANTHROPIC_API_KEY=...
+fly deploy
+```
+
+Fly gives you a web address like `https://your-app.fly.dev`. Open it anywhere — on your phone, add `?server=https://your-app.fly.dev&key=your-secret-password` the first time. Pick a long, random `VAULT_KEY`: it is the password to your entire vault.
+
+**Step 5 — Let the assistant use your computer.**
+When you want the assistant to be able to run things on your laptop (from your phone, by voice), run this on the laptop and leave it open:
+
+```bash
+npm run node-harness -- --server wss://your-app.fly.dev
+```
+
+Every command it wants to run shows an **Approve / Deny** card on your screen first. There's also a pause switch under **Devices** in the sidebar that stops the assistant everywhere, instantly.
+
+**Step 6 — Your notes are always yours.**
+Settings (gear icon) → **Export vault** downloads everything as a zip of plain Markdown files at any time.
+
+**What still needs a developer:** publishing the desktop app installers (needs an Apple developer account) and the iPhone App Store version (needs a Mac with Xcode). Everything else above you can do yourself.
+
+---
+
 **The two things that are the point:**
 
 1. **Cross-session / cross-device continuity.** The vault and every conversation persist in the cloud and sync live to every connected device, each of which keeps a fast local IndexedDB cache. Close the tab, switch from phone to laptop — everything is exactly as left. Chats are folders; each turn is a Markdown file with frontmatter (`role`, `timestamp`, `device`, `provider`, `model`, `tools_used`). Resuming a session is just re-reading those records — there is no separate session database that can drift from the vault.

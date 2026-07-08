@@ -13,6 +13,8 @@ export interface Connector {
   url: string;
   token: string;
   enabled: boolean;
+  // 'ask' confirms every tool call on-screen; 'auto' marks the connector trusted.
+  policy: 'ask' | 'auto';
 }
 
 export interface ConnectorStatus {
@@ -35,6 +37,7 @@ export function listConnectors(records: Map<string, VaultRecord>): Connector[] {
       url: String(data.url || ''),
       token: data.token ? String(data.token) : '',
       enabled: data.enabled !== false,
+      policy: data.policy === 'auto' ? 'auto' : 'ask',
     });
   }
   return out.sort((a, b) => a.name.localeCompare(b.name));
@@ -50,6 +53,7 @@ export async function saveConnector(connector: Connector): Promise<void> {
         url: connector.url,
         ...(connector.token ? { token: connector.token } : {}),
         enabled: connector.enabled,
+        policy: connector.policy,
       },
       ''
     )

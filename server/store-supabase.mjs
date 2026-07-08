@@ -65,6 +65,17 @@ export class SupabaseVaultStore extends VaultStore {
     }
     this.rev = Math.max(vault.rev ?? 0, 0, ...[...this.records.values()].map((r) => r.rev));
 
+    // Compact expired tombstones here too — and actually remove the rows,
+    // or the next hydrate would resurrect them.
+    const dropped = this._compactTombstones();
+    for (let i = 0; i < dropped.length; i += 100) {
+      await this.client
+        .from('vault_records')
+        .delete()
+        .eq('vault_id', this.vaultId)
+        .in('path', dropped.slice(i, i + 100));
+    }
+
     // Write-through: every mutation the base class makes emits 'change';
     // mirror those records into Postgres, batched and retried.
     this.on('change', (records) => {

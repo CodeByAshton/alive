@@ -56,4 +56,5 @@ export interface ApprovalRequest {
   chatPath: string;
   command: string;
   cwd: string | null;
+  kind: 'command' | 'connector';
 }

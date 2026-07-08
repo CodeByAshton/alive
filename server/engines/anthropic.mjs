@@ -32,7 +32,10 @@ export function createAnthropicEngine() {
         const params = {
           model,
           max_tokens: 16000,
-          system,
+          // Cache the system prompt (instructions + vault outline + standing
+          // instructions) — it's the bulk of every turn and identical across
+          // the tool loop, so this cuts cost/latency substantially.
+          system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
           messages: providerMessages,
         };
         if (ADAPTIVE_THINKING.has(model)) params.thinking = { type: 'adaptive' };
