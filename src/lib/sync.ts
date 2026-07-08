@@ -205,8 +205,11 @@ async function refreshPendingCount() {
 // ---- public write API (cache-first, then cloud) ----
 
 export async function putRecord(path: string, type: 'file' | 'folder', content = ''): Promise<void> {
-  const mtime = Date.now();
   const existing = useVault.getState().records.get(path);
+  // Strictly monotonic per record so rapid successive writes stay ordered —
+  // the store relies on mtime to keep stale server echoes from clobbering a
+  // newer optimistic write.
+  const mtime = Math.max(Date.now(), (existing?.mtime ?? 0) + 1);
   const rec: VaultRecord = {
     path,
     type,

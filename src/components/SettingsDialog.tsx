@@ -4,7 +4,7 @@
 // via the .vault/settings.md record; instructions save on demand.
 
 import { useEffect, useState } from 'react';
-import { Check, Download, LogOut, Settings } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, Download, LogOut, RotateCcw, Settings } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -33,6 +33,14 @@ import { getServerConfig } from '../lib/config';
 import { authMode, authQuery, getAuthClient, signOut } from '../lib/auth';
 import { getDeviceId, getSurface } from '../lib/device';
 import { ACCENTS, THEMES, type Theme } from '../lib/appearance';
+import {
+  isMenuCustomized,
+  moveMenuItem,
+  orderedMenu,
+  resetMenu,
+  setMenuItemHidden,
+  visibleMenu,
+} from '../lib/menu';
 import { updateSettings, useSettings, type AppSettings } from '../lib/settings';
 import type { AssistantMode } from '../lib/types';
 
@@ -143,6 +151,73 @@ function ThemeCard({ theme, active, onPick }: { theme: Theme; active: boolean; o
   );
 }
 
+// Sidebar menu manager — reorder and show/hide the sidebar's menu items,
+// including any a plugin registers later. Mirrors the right-click menu on
+// the items themselves.
+function SidebarMenuSection({ settings }: { settings: AppSettings }) {
+  const ordered = orderedMenu(settings);
+  const visibleCount = visibleMenu(settings).length;
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <SectionLabel>Sidebar menu</SectionLabel>
+        {isMenuCustomized(settings) && (
+          <Button
+            variant="ghost"
+            size="xs"
+            className="menu-reset -my-1 text-neutral-400"
+            onClick={() => resetMenu()}
+          >
+            <RotateCcw className="size-3" /> Reset
+          </Button>
+        )}
+      </div>
+      <div className="menu-manager flex flex-col divide-y rounded-xl border bg-neutral-50/60">
+        {ordered.map((item, i) => {
+          const visible = !settings.menuHidden.includes(item.id);
+          return (
+            <div key={item.id} data-menu-item={item.id} className="flex items-center gap-2.5 px-3 py-2">
+              <item.icon className="size-4 shrink-0 text-neutral-400" />
+              <span className="min-w-0 flex-1 truncate text-[13px] text-neutral-800">{item.label}</span>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="size-6 text-neutral-400"
+                title="Move up"
+                disabled={i === 0}
+                onClick={() => moveMenuItem(item.id, -1)}
+              >
+                <ArrowUp className="size-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="size-6 text-neutral-400"
+                title="Move down"
+                disabled={i === ordered.length - 1}
+                onClick={() => moveMenuItem(item.id, 1)}
+              >
+                <ArrowDown className="size-3.5" />
+              </Button>
+              <Switch
+                checked={visible}
+                disabled={visible && visibleCount <= 1}
+                onCheckedChange={(v) => setMenuItemHidden(item.id, !v)}
+                aria-label={`Show ${item.label} in the sidebar`}
+              />
+            </div>
+          );
+        })}
+      </div>
+      <p className="px-0.5 text-xs leading-relaxed text-neutral-400">
+        Reorder or hide the sidebar's menu items — handy when plugins add their own. You can also right-click
+        an item in the sidebar.
+      </p>
+    </div>
+  );
+}
+
 function AppearanceSection({ settings }: { settings: AppSettings }) {
   const records = useVault((s) => s.records);
 
@@ -198,6 +273,8 @@ function AppearanceSection({ settings }: { settings: AppSettings }) {
           </SelectContent>
         </Select>
       </SettingRow>
+
+      <SidebarMenuSection settings={settings} />
     </div>
   );
 }

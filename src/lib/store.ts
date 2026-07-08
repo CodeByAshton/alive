@@ -72,6 +72,10 @@ export const useVault = create<VaultState>((set) => ({
         // Server revs win; optimistic local writes carry rev 0 and are
         // replaced by the echoed server record.
         if (existing && rec.rev !== 0 && existing.rev > rec.rev) continue;
+        // ...but never let the echo of an OLDER write clobber a NEWER
+        // optimistic write still in flight (rapid successive edits to the
+        // same record, e.g. flipping two settings quickly).
+        if (existing && existing.rev === 0 && rec.mtime < existing.mtime) continue;
         if (rec.deleted) records.delete(rec.path);
         else records.set(rec.path, rec);
       }

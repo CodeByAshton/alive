@@ -18,6 +18,11 @@ export interface AppSettings {
   highContrast: boolean;
   // Enabled plugin ids; null means "no explicit choice yet" (defaults apply).
   plugins: string[] | null;
+  // Sidebar menu customization. Order is a preference list (registry items
+  // not named — e.g. added later by a plugin — append in default order);
+  // hidden is an explicit removal list, so new items show up by default.
+  menuOrder: string[] | null;
+  menuHidden: string[];
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -27,6 +32,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   reduceMotion: false,
   highContrast: false,
   plugins: null,
+  menuOrder: null,
+  menuHidden: [],
 };
 
 export function getSettings(records: Map<string, VaultRecord>): AppSettings {
@@ -40,6 +47,8 @@ export function getSettings(records: Map<string, VaultRecord>): AppSettings {
     reduceMotion: data.reduceMotion === true,
     highContrast: data.highContrast === true,
     plugins: Array.isArray(data.plugins) ? data.plugins.map(String) : null,
+    menuOrder: Array.isArray(data.menuOrder) ? data.menuOrder.map(String) : null,
+    menuHidden: Array.isArray(data.menuHidden) ? data.menuHidden.map(String) : [],
   };
 }
 
@@ -56,6 +65,8 @@ export async function updateSettings(
     highContrast: next.highContrast,
   };
   if (next.plugins !== null) data.plugins = next.plugins;
+  if (next.menuOrder !== null) data.menuOrder = next.menuOrder;
+  if (next.menuHidden.length) data.menuHidden = next.menuHidden;
   await putRecord(
     SETTINGS_PATH,
     'file',

@@ -4,10 +4,14 @@
 
 import { useMemo, useRef, useState, type ElementType } from 'react';
 import {
+  ArrowDown,
+  ArrowUp,
   CalendarDays,
   ChevronRight,
   CirclePause,
   Copy,
+  EyeOff,
+  RotateCcw,
   FileText,
   Folder,
   FolderInput,
@@ -16,7 +20,6 @@ import {
   LayoutTemplate,
   Link,
   MessageSquare,
-  MonitorSmartphone,
   MoreHorizontal,
   PencilLine,
   Plus,
@@ -26,7 +29,6 @@ import {
   Cable,
   SlidersHorizontal,
   Trash2,
-  Waypoints,
   Zap,
 } from 'lucide-react';
 
@@ -59,6 +61,15 @@ import { useVault } from '../lib/store';
 import { deletePath, movePath, putRecord, setAssistantPaused } from '../lib/sync';
 import { createChat, getChatConfig, listChats, renameChat } from '../lib/chat';
 import { createFromTemplate, enabledPlugins, listTemplates, openDailyNote, usePlugin } from '../lib/plugins';
+import {
+  isMenuCustomized,
+  moveMenuItem,
+  orderedMenu,
+  resetMenu,
+  setMenuItemHidden,
+  visibleMenu,
+} from '../lib/menu';
+import { useSettings } from '../lib/settings';
 import type { VaultRecord } from '../lib/types';
 import { SettingsDialog } from './SettingsDialog';
 import { ConfirmDialog, NameDialog, type ConfirmPrompt, type NamePrompt } from './dialogs';
@@ -544,13 +555,35 @@ function DevicesSection() {
 
 /* ── container ────────────────────────────────────────────────────────── */
 
-const MENU = [
-  { id: 'files', icon: Folder, label: 'Files' },
-  { id: 'chats', icon: MessageSquare, label: 'Chats' },
-  { id: 'customize', icon: SlidersHorizontal, label: 'Customize' },
-  { id: 'graph', icon: Waypoints, label: 'Graph' },
-  { id: 'devices', icon: MonitorSmartphone, label: 'Devices' },
-] as const;
+// Right-click on a sidebar menu item: reorder, hide, reset. Preferences live
+// in the synced settings record (see lib/menu.ts).
+function NavItemMenu({ id, children }: { id: string; children: React.ReactNode }) {
+  const settings = useSettings();
+  const ordered = orderedMenu(settings);
+  const idx = ordered.findIndex((m) => m.id === id);
+  const visibleCount = visibleMenu(settings).length;
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+      <ContextMenuContent className="w-48">
+        <ContextMenuItem disabled={idx <= 0} onClick={() => moveMenuItem(id, -1)}>
+          <ArrowUp /> Move up
+        </ContextMenuItem>
+        <ContextMenuItem disabled={idx === ordered.length - 1} onClick={() => moveMenuItem(id, 1)}>
+          <ArrowDown /> Move down
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem disabled={visibleCount <= 1} onClick={() => setMenuItemHidden(id, true)}>
+          <EyeOff /> Hide from sidebar
+        </ContextMenuItem>
+        <ContextMenuItem disabled={!isMenuCustomized(settings)} onClick={() => resetMenu()}>
+          <RotateCcw /> Reset menu
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
 
 // Claude-style Customize entry: a hover dropdown holding Skills + Connectors.
 function CustomizeItem({ className }: { className: (active: boolean) => string }) {
@@ -632,6 +665,7 @@ export function Sidebar() {
   const [confirmPrompt, setConfirmPrompt] = useState<ConfirmPrompt | null>(null);
   const dialogs: DialogApi = { ask: setNamePrompt, confirm: setConfirmPrompt };
   const dailyNotesOn = usePlugin('daily-notes');
+  const settings = useSettings();
 
   const activeDevices = presence.filter((d) => d.state === 'active').length;
 
@@ -716,19 +750,27 @@ export function Sidebar() {
         <SettingsDialog />
       </div>
 
-      {/* menu items */}
+      {/* menu items — order/visibility are user preferences (right-click, or
+          Settings → Appearance) so plugin-added entries stay manageable */}
       <nav className="mb-2 flex flex-col gap-px">
-        {MENU.map((item) => {
+        {visibleMenu(settings).map((item) => {
           const navCls = (active: boolean) =>
             cn(
               'nav-item group flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 text-[13px] font-medium text-neutral-600 transition-colors select-none',
               'hover:bg-neutral-200/55 hover:text-neutral-900',
               active && 'bg-white text-neutral-900 shadow-xs'
             );
-          if (item.id === 'customize') return <CustomizeItem key={item.id} className={navCls} />;
+          if (item.id === 'customize')
+            return (
+              <NavItemMenu key={item.id} id={item.id}>
+                <div className="contents">
+                  <CustomizeItem className={navCls} />
+                </div>
+              </NavItemMenu>
+            );
           return (
+          <NavItemMenu key={item.id} id={item.id}>
           <button
-            key={item.id}
             title={item.label}
             className={navCls(item.id === 'graph' ? mainView === 'graph' : railTab === item.id)}
             onClick={() => {
@@ -736,7 +778,7 @@ export function Sidebar() {
                 setMainView('graph');
                 return;
               }
-              setRailTab(item.id);
+              setRailTab(item.id as 'files' | 'chats' | 'devices');
               if (item.id === 'chats') setMainView('chat');
             }}
           >
@@ -761,6 +803,7 @@ export function Sidebar() {
               </span>
             )}
           </button>
+          </NavItemMenu>
           );
         })}
       </nav>
