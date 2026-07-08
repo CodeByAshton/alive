@@ -368,6 +368,25 @@ function collectReferencedFiles(store, text) {
   return files;
 }
 
+// Effort routing: classify each turn so simple conversational messages run
+// lean (Anthropic's output_config.effort — less thinking, terser output,
+// fewer tool calls) while anything that smells like real work keeps full
+// depth. Deliberately conservative: 'low' only for short, single-line,
+// reference-free small talk — a wrong 'high' costs tokens, a wrong 'low'
+// costs quality. The model never changes, so the prompt cache stays hot.
+const ACTION_WORDS =
+  /\b(create|make|write|edit|add|append|update|delete|remove|move|rename|organi[sz]e|build|fix|refactor|implement|run|install|deploy|search|find|fetch|read|open|summari[sz]e|remind|automate|schedule|plan|review|analy[sz]e|compare|translate|draft|generate|list|clean|merge|convert|help me|set up|look up)\b/i;
+
+export function classifyEffort(text, { skill } = {}) {
+  const t = String(text || '').trim();
+  if (skill) return 'high'; // skills are instructions to follow — full depth
+  if (t.length > 160) return 'high';
+  if (/\n|```/.test(t)) return 'high';
+  if (/\[\[|@[\w./-]/.test(t)) return 'high'; // references pull files into the turn
+  if (ACTION_WORDS.test(t)) return 'high';
+  return 'low';
+}
+
 const AGENT_FILE = '.vault/AGENT.md';
 
 function vaultOutline(store) {
@@ -454,6 +473,8 @@ export async function runTurn({ store, presence, chatPath, text, deviceType, pro
     return result;
   };
 
+  const effort = classifyEffort(text, { skill });
+
   const engine = getEngine(provider);
   let result;
   try {
@@ -462,6 +483,7 @@ export async function runTurn({ store, presence, chatPath, text, deviceType, pro
       system,
       messages,
       tools,
+      effort,
       executeTool: trackingExecutor,
       onEvent: (event) => {
         if (event.type === 'text') broadcast({ type: 'turn_delta', chatPath, text: event.text });
@@ -487,6 +509,7 @@ export async function runTurn({ store, presence, chatPath, text, deviceType, pro
         device: deviceType,
         provider,
         model,
+        effort,
         tools_used: result.toolsUsed,
         ...(filesTouched.length ? { files_touched: [...new Set(filesTouched)] } : {}),
         ...(skill ? { skill: skill.trigger } : {}),

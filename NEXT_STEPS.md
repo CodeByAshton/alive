@@ -48,7 +48,9 @@ The goal: sell Vault as a subscription. Accounts + per-user vaults already exist
 between this and something strangers can download and trust.
 
 ## 1. Validate the real model path (first — everything else builds on it)
-- [ ] Smoke-test the Anthropic engine with a real `ANTHROPIC_API_KEY` (streaming, tool loop, adaptive thinking, `pause_turn`)
+- [ ] Smoke-test the Anthropic engine with a real `ANTHROPIC_API_KEY` (streaming, tool loop, adaptive
+      thinking, `pause_turn`) — including the new conversation cache breakpoint (watch
+      `usage.cache_read_input_tokens` climb across turns) and `output_config.effort` on low/high turns
 - [ ] Smoke-test OpenAI / Gemini / Ollama through the OpenAI-compat engine (tool-call deltas, no-tools degradation)
 - [ ] Verify model switching mid-thread with two real providers
 - [ ] Add an e2e job that runs against real providers when keys are present (skip otherwise)

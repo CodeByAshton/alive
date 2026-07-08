@@ -18,7 +18,7 @@ import { WebSocketServer } from 'ws';
 import { VaultStore } from './store.mjs';
 import { PresenceRegistry } from './presence.mjs';
 import { runTurn } from './harness.mjs';
-import { listProviders } from './engines/index.mjs';
+import { listProviders, utilityModelFor } from './engines/index.mjs';
 import { migrateVault, seedVault } from './seed.mjs';
 import { connectorStatus } from './connectors.mjs';
 import { buildZip } from './zip.mjs';
@@ -445,12 +445,15 @@ wss.on('connection', async (ws, req) => {
         case 'automation_edit': {
           const requestId = String(msg.requestId ?? '');
           try {
+            const provider = msg.provider || 'anthropic';
             const { path } = await editAutomationWithModel({
               ctx,
               path: msg.path ? String(msg.path) : null,
               instruction: String(msg.instruction ?? '').slice(0, MAX_TURN_TEXT),
-              provider: msg.provider || 'anthropic',
-              model: msg.model || 'claude-opus-4-8',
+              provider,
+              // A machine job with strict validation after it — the cheap
+              // tier is indistinguishable here.
+              model: utilityModelFor(provider, msg.model || 'claude-opus-4-8'),
             });
             ctx.broadcast({ type: 'automation_edited', requestId, ok: true, path });
           } catch (err) {

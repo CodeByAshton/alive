@@ -21,6 +21,7 @@
     "test:auth": "node scripts/test-auth.mjs",
     "test:oauth": "node scripts/test-oauth.mjs",
     "test:automations": "node scripts/test-automations.mjs",
+    "test:routing": "node scripts/test-routing.mjs",
     "smoke:supabase": "node scripts/smoke-supabase.mjs"
   },
   "build": {

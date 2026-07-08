@@ -296,6 +296,7 @@ Add "created_by: user" to the frontmatter.`;
     system,
     messages: [{ role: 'user', content: String(instruction) }],
     tools: [],
+    effort: 'low', // small structured job, validated below
     executeTool: async () => 'ok',
     onEvent: () => {},
   });

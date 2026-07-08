@@ -128,6 +128,7 @@ Previously dismissed proposals (never re-propose): ${dismissed.join(', ') || '(n
     system,
     messages: [{ role: 'user', content: `Recent user messages:\n\n${transcript}` }],
     tools: [],
+    effort: 'low', // background job on the cheap tier
     executeTool: async () => 'ok',
     onEvent: () => {},
   });

@@ -183,6 +183,16 @@ The assistant learns, then hands the work off to something that isn't a model.
 
 **Memory** (the Memory pane in the same view) is a visible, editable note (`.vault/memory/observations.md`) loaded into every turn — the assistant appends to it with `save_memory` when it learns something durable. A daily **reflection** pass (one cheap model call; `VAULT_REFLECTION_MODEL`, default Haiku) mines recent chats for patterns: durable facts land in memory, and repeated asks become *suggested* automations — created disabled, waiting for an explicit Approve in the UI (Dismiss is remembered and never re-proposed). `npm run test:automations` proves the whole loop offline.
 
+## Token economics
+
+Three layers keep quality up and spend down, and none of them changes which model answers you:
+
+- **Conversation caching** — the Anthropic engine marks the system block *and* the last message of every request as cache breakpoints, so the replayed thread (Vault resends recent history each turn) bills at ~0.1× input price once a conversation is a few turns old. Long working sessions get most of their input cost back automatically.
+- **Effort routing** — every turn is classified server-side (`effort: low|high`, recorded in the reply's frontmatter): short reference-free small talk runs lean via Anthropic's `output_config.effort`, anything that looks like work keeps full depth. The model never changes, so the cache stays hot; on models without the effort parameter it's simply skipped.
+- **Cheap tier for machine jobs** — work the user never talks to (nightly reflection, automation prompt-window edits) runs on Haiku by default: `VAULT_REFLECTION_MODEL` and `VAULT_UTILITY_MODEL` override.
+
+`npm run test:routing` covers the classifier, breakpoint placement, and model resolution offline.
+
 ## Web access
 
 The assistant can read the web in every conversation: a `fetch_url` tool (any provider, any model — SSRF-guarded so only public addresses are reachable) plus Anthropic's native `web_search` when the provider is Claude (real search results with citations, executed server-side by the API; disable with `VAULT_WEB_SEARCH=0`).

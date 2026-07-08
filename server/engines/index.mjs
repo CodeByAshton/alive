@@ -35,6 +35,16 @@ export function getEngine(provider) {
   return engine;
 }
 
+// Machine jobs (automation prompt-window edits, reflection, future title/
+// summary work) never talk to the user — route them to the cheapest capable
+// model instead of whatever the chat happens to be on. Only Anthropic gets
+// remapped; other providers keep the caller's model (we don't know their
+// catalogs' cheap tier).
+export function utilityModelFor(provider, requestedModel) {
+  if (provider === 'anthropic') return process.env.VAULT_UTILITY_MODEL || 'claude-haiku-4-5';
+  return requestedModel;
+}
+
 export async function listProviders() {
   const providers = [
     {
