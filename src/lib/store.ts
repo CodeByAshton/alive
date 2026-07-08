@@ -10,6 +10,7 @@ interface VaultState {
   activePath: string | null; // file open in the editor
   activeChat: string | null; // chat folder open in the chat pane
   railTab: 'files' | 'chats' | 'skills' | 'devices';
+  editorMode: 'read' | 'edit';
   streams: Map<string, StreamState>;
 
   applyRecords: (records: VaultRecord[]) => void;
@@ -20,6 +21,8 @@ interface VaultState {
   setActivePath: (path: string | null) => void;
   setActiveChat: (path: string | null) => void;
   setRailTab: (tab: 'files' | 'chats' | 'skills' | 'devices') => void;
+  setEditorMode: (mode: 'read' | 'edit') => void;
+  openFile: (path: string, mode?: 'read' | 'edit') => void;
   updateStream: (chatPath: string, fn: (s: StreamState) => StreamState) => void;
   clearStream: (chatPath: string) => void;
 }
@@ -35,6 +38,7 @@ export const useVault = create<VaultState>((set) => ({
   activePath: null,
   activeChat: null,
   railTab: 'files',
+  editorMode: 'read',
   streams: new Map(),
 
   applyRecords: (incoming) =>
@@ -58,6 +62,8 @@ export const useVault = create<VaultState>((set) => ({
   setActivePath: (activePath) => set({ activePath }),
   setActiveChat: (activeChat) => set({ activeChat }),
   setRailTab: (railTab) => set({ railTab }),
+  setEditorMode: (editorMode) => set({ editorMode }),
+  openFile: (path, mode = 'read') => set({ activePath: path, editorMode: mode }),
 
   updateStream: (chatPath, fn) =>
     set((state) => {

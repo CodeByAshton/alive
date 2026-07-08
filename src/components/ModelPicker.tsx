@@ -1,6 +1,15 @@
 // Per-chat model picker. Switching provider/model mid-thread keeps the whole
 // conversation — continuity lives in the harness, not the model.
 
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { useVault } from '../lib/store';
 import { getChatConfig, setChatConfig } from '../lib/chat';
 
@@ -8,35 +17,39 @@ export function ModelPicker({ chatPath }: { chatPath: string }) {
   const providers = useVault((s) => s.providers);
   const records = useVault((s) => s.records);
   const config = getChatConfig(records, chatPath);
-
-  const options = providers.flatMap((p) =>
-    p.models.map((m) => ({
-      value: `${p.id}::${m}`,
-      label: `${p.label} · ${m}`,
-      disabled: !p.available,
-    }))
-  );
-
   const current = `${config.provider}::${config.model}`;
-  if (!options.some((o) => o.value === current)) {
-    options.unshift({ value: current, label: `${config.provider} · ${config.model}`, disabled: false });
-  }
+
+  const known = providers.some((p) => p.models.includes(config.model));
 
   return (
-    <select
-      className="model-picker mono"
+    <Select
       value={current}
-      onChange={async (e) => {
-        const [provider, model] = e.target.value.split('::');
+      onValueChange={async (value) => {
+        const [provider, model] = value.split('::');
         await setChatConfig(records, chatPath, { provider, model });
       }}
     >
-      {options.map((o) => (
-        <option key={o.value} value={o.value} disabled={o.disabled}>
-          {o.label}
-          {o.disabled ? ' (no key)' : ''}
-        </option>
-      ))}
-    </select>
+      <SelectTrigger size="sm" className="model-picker max-w-44 font-mono text-[11px] text-neutral-500" title="Model">
+        <SelectValue placeholder="Model" />
+      </SelectTrigger>
+      <SelectContent align="end">
+        {!known && (
+          <SelectItem value={current} className="font-mono text-xs">
+            {config.model}
+          </SelectItem>
+        )}
+        {providers.map((p) => (
+          <SelectGroup key={p.id}>
+            <SelectLabel>{p.label}</SelectLabel>
+            {p.models.map((m) => (
+              <SelectItem key={`${p.id}::${m}`} value={`${p.id}::${m}`} disabled={!p.available} className="font-mono text-xs">
+                {m}
+                {!p.available ? ' — no key' : ''}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }

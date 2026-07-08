@@ -3,6 +3,11 @@
 // the assistant can do everywhere.
 
 import { useEffect, useRef, useState } from 'react';
+import { Mic, Volume2 } from 'lucide-react';
+
+import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
+import { cn } from '@/lib/utils';
 import { useVault } from '../lib/store';
 import { chatMessages, getChatConfig } from '../lib/chat';
 import { onTurnDone, sendTurn } from '../lib/sync';
@@ -54,25 +59,37 @@ export function Phone() {
   };
 
   return (
-    <div className="phone">
-      <div className="phone-header">
-        <span className="app-title">Vault</span>
-        <span className={`conn-dot ${connected ? 'on' : 'off'}`} />
-        <button className={`voice-toggle mono ${speak ? 'on' : ''}`} onClick={() => setSpeak(!speak)} title="Speak replies aloud">
-          voice {speak ? 'on' : 'off'}
-        </button>
-      </div>
+    <div className="phone flex h-full flex-col bg-background">
+      <header
+        className="flex items-center gap-2 border-b bg-white/80 px-4 pb-2.5 backdrop-blur-xl"
+        style={{ paddingTop: 'calc(10px + env(safe-area-inset-top))' }}
+      >
+        <span className="text-sm font-semibold tracking-tight">Vault</span>
+        <span className={cn('size-1.5 rounded-full', connected ? 'bg-neutral-800' : 'bg-neutral-300')} />
+        <span className="flex-1" />
+        <label className="voice-toggle flex items-center gap-1.5 text-xs text-neutral-500">
+          <Volume2 className="size-3.5" />
+          <Switch checked={speak} onCheckedChange={setSpeak} title="Speak replies aloud" />
+        </label>
+      </header>
+
       <Chat compact />
-      <div className="phone-voice">
-        {interim && <div className="interim mono">{interim}</div>}
-        <button
-          className={`mic ${listening ? 'listening' : ''}`}
+
+      <div
+        className="phone-voice flex flex-col gap-1.5 border-t px-3 pt-2"
+        style={{ paddingBottom: 'calc(10px + env(safe-area-inset-bottom))' }}
+      >
+        {interim && <div className="interim px-1 font-mono text-xs text-neutral-400">{interim}</div>}
+        <Button
+          variant={listening ? 'destructive' : 'secondary'}
+          className={cn('mic h-11 rounded-xl text-sm font-medium', listening && 'animate-pulse')}
           onClick={toggleMic}
           disabled={!voice.available || !activeChat}
-          title={voice.available ? 'Hold a thought, tap to speak' : 'Speech recognition unavailable in this browser'}
+          title={voice.available ? 'Tap to speak' : 'Speech recognition unavailable in this browser'}
         >
-          {listening ? '● listening — tap to stop' : 'speak'}
-        </button>
+          <Mic className="size-4" />
+          {listening ? 'Listening — tap to stop' : 'Speak'}
+        </Button>
       </div>
     </div>
   );

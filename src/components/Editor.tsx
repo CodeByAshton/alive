@@ -1,12 +1,17 @@
-// Markdown editor pane: CodeMirror for editing, react-markdown for preview.
-// Saves are debounced write-through: cache first, then cloud, live everywhere.
+// The note pane. Opens in a Notion-style reading view (rendered Markdown,
+// frontmatter as quiet properties); Edit switches to CodeMirror. Saves are
+// debounced write-through: cache first, then cloud, live everywhere.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { EditorView, keymap, placeholder } from '@codemirror/view';
 import { EditorState } from '@codemirror/state';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
+import { ChevronRight, FileText } from 'lucide-react';
+
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { parseFrontmatter } from '../../shared/frontmatter.mjs';
 import { useVault } from '../lib/store';
 import { putRecord } from '../lib/sync';
 import { Markdown } from './Markdown';
@@ -14,7 +19,8 @@ import { Markdown } from './Markdown';
 export function Editor() {
   const activePath = useVault((s) => s.activePath);
   const record = useVault((s) => (s.activePath ? s.records.get(s.activePath) : undefined));
-  const [mode, setMode] = useState<'edit' | 'preview'>('edit');
+  const mode = useVault((s) => s.editorMode);
+  const setMode = useVault((s) => s.setEditorMode);
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -50,8 +56,6 @@ export function Editor() {
       view.destroy();
       viewRef.current = null;
     };
-    // Recreate the editor when switching files or modes; remote edits to the
-    // open file are applied below without recreating.
   }, [activePath, mode]);
 
   // Apply remote changes to the open document (avoid clobbering local typing).
@@ -64,32 +68,63 @@ export function Editor() {
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: record.content } });
   }, [record?.content, record?.mtime]);
 
+  const parsed = useMemo(
+    () => (record ? parseFrontmatter(record.content) : { data: {}, body: '' }),
+    [record?.content]
+  );
+  const properties = Object.entries(parsed.data);
+
   if (!activePath) {
     return (
-      <div className="editor empty">
-        <p>Select a note, or create one.</p>
+      <div className="editor flex flex-1 flex-col items-center justify-center gap-2 text-neutral-400">
+        <FileText className="size-6" strokeWidth={1.5} />
+        <p className="text-sm">Select a note, or create one.</p>
       </div>
     );
   }
 
+  const crumbs = activePath.replace(/\.md$/, '').split('/');
+
   return (
-    <div className="editor">
-      <div className="editor-header">
-        <span className="mono editor-path">{activePath}</span>
-        <div className="editor-modes">
-          <button className={mode === 'edit' ? 'active' : ''} onClick={() => setMode('edit')}>
-            Edit
-          </button>
-          <button className={mode === 'preview' ? 'active' : ''} onClick={() => setMode('preview')}>
-            Preview
-          </button>
-        </div>
-      </div>
+    <div className="editor flex min-h-0 flex-1 flex-col">
+      <header className="flex h-12 shrink-0 items-center gap-1 border-b px-4">
+        <nav className="flex min-w-0 flex-1 items-center gap-1 text-[13px]">
+          {crumbs.map((part, i) => (
+            <span key={i} className="flex min-w-0 items-center gap-1">
+              {i > 0 && <ChevronRight className="size-3 shrink-0 text-neutral-300" />}
+              <span className={i === crumbs.length - 1 ? 'truncate font-medium text-neutral-900' : 'truncate text-neutral-400'}>
+                {part}
+              </span>
+            </span>
+          ))}
+        </nav>
+        <Tabs value={mode} onValueChange={(v) => setMode(v as 'read' | 'edit')}>
+          <TabsList className="editor-modes">
+            <TabsTrigger value="read">Read</TabsTrigger>
+            <TabsTrigger value="edit">Edit</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </header>
+
       {mode === 'edit' ? (
-        <div className="editor-cm" ref={hostRef} />
+        <div className="editor-cm quiet-scroll flex-1 overflow-auto" ref={hostRef} />
       ) : (
-        <div className="editor-preview">
-          <Markdown text={record?.content ?? ''} />
+        <div className="editor-preview quiet-scroll flex-1 overflow-y-auto">
+          <div className="mx-auto max-w-[72ch] px-8 py-8 pb-[35vh]">
+            {properties.length > 0 && (
+              <div className="mb-6 flex flex-col gap-1 rounded-xl border bg-neutral-50/60 px-4 py-3">
+                {properties.map(([key, value]) => (
+                  <div key={key} className="flex gap-3 text-[12.5px]">
+                    <span className="w-24 shrink-0 text-neutral-400">{key}</span>
+                    <span className="font-mono text-xs leading-5 text-neutral-600">
+                      {typeof value === 'string' ? value : JSON.stringify(value)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <Markdown text={parsed.body} />
+          </div>
         </div>
       )}
     </div>

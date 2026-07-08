@@ -24,7 +24,7 @@ const desktopCtx = await browser.newContext({ viewport: { width: 1440, height: 9
 const desktop = await desktopCtx.newPage();
 desktop.on('pageerror', (e) => console.log('desktop pageerror:', e.message));
 await desktop.goto(`${BASE}/?surface=desktop`);
-await desktop.waitForSelector('.rail', { timeout: 15000 });
+await desktop.waitForSelector('.sidebar', { timeout: 15000 });
 
 // 1. Vault tree with seeded notes
 await desktop.waitForSelector('.tree-row', { timeout: 10000 });
@@ -37,8 +37,9 @@ const graphCanvas = await desktop.locator('.right-rail canvas').count();
 check('graph view renders', graphCanvas > 0);
 
 // 3. Create a note with a wikilink from the desktop (Files panel action)
-desktop.once('dialog', (d) => d.accept('Sync Test'));
-await desktop.locator('.panel-actions button[title="New note"]').click();
+await desktop.locator('button[title="New note"]').click();
+await desktop.locator('[data-testid="name-dialog"] input').fill('Sync Test');
+await desktop.locator('[data-testid="name-dialog"] input').press('Enter');
 await desktop.waitForSelector('.editor-cm .cm-content', { timeout: 5000 });
 await desktop.locator('.editor-cm .cm-content').click();
 await desktop.keyboard.press('Control+End');
@@ -47,7 +48,7 @@ await desktop.waitForTimeout(900); // debounce save
 check('note created on desktop', (await desktop.locator('.tree').innerText()).includes('Sync Test'));
 
 // 4. Rail panels: skills panel lists seeded skills
-await desktop.locator('.rail-tab[title="Skills"]').click();
+await desktop.locator('.nav-item[title="Skills"]').click();
 const skillsText = await desktop.locator('.panel-list').innerText();
 check('skills panel lists vault skills', skillsText.includes('/summarize') && skillsText.includes('/journal'));
 
@@ -59,7 +60,7 @@ await phone.goto(`${BASE}/?surface=phone`);
 await phone.waitForSelector('.phone', { timeout: 15000 });
 
 // 5. Presence: devices panel shows both devices
-await desktop.locator('.rail-tab[title="Devices"]').click();
+await desktop.locator('.nav-item[title="Devices"]').click();
 await desktop.waitForTimeout(1000);
 const presenceText = await desktop.locator('.presence-panel').innerText();
 check('presence registry shows both devices', presenceText.includes('desktop-') && presenceText.includes('phone-'));
@@ -72,9 +73,10 @@ const phoneHasNote = await phone.evaluate(async () => {
 check('phone has local IndexedDB cache', phoneHasNote);
 
 // 7. Start a chat on the phone, select mock model
-await phone.locator('.chat-header button', { hasText: '+ New' }).click();
+await phone.locator('.chat-header button[title="New chat"]').click();
 await phone.waitForSelector('.model-picker', { timeout: 5000 });
-await phone.locator('.model-picker').selectOption({ label: 'Mock (dev) · mock-1' });
+await phone.locator('.model-picker').click();
+await phone.locator('[role="option"]', { hasText: 'mock-1' }).click();
 await phone.waitForTimeout(400);
 
 // 8. DEVICE-AWARENESS PART 1: close the desktop so only the phone is present.
@@ -107,7 +109,7 @@ await desktop2.goto(`${BASE}/?surface=desktop`);
 await desktop2.waitForSelector('.tree-row', { timeout: 15000 });
 
 // 11. Continuity: the chat started on the phone is visible on the new desktop
-await desktop2.locator('.rail-tab[title="Chats"]').click();
+await desktop2.locator('.nav-item[title="Chats"]').click();
 const chatRows = await desktop2.locator('.panel-list .panel-row').count();
 check('chat started on phone visible in desktop chats panel', chatRows > 0);
 await desktop2.locator('.panel-list .panel-row').first().click();
@@ -127,7 +129,7 @@ check(
 );
 
 // 12. The new note shows up live in the desktop tree
-await desktop2.locator('.rail-tab[title="Files"]').click();
+await desktop2.locator('.nav-item[title="Files"]').click();
 await desktop2.waitForTimeout(1200);
 const tree2 = await desktop2.locator('.tree').innerText();
 check('assistant-created note appears live in desktop tree', tree2.includes('Device Probe'));
@@ -173,11 +175,11 @@ const reloaded = await phone.locator('.chat-scroll').innerText();
 check('reload restores conversation from cache+cloud', reloaded.includes('Device Probe'));
 
 // 17. Model picker lists multiple providers
-const pickerValues = await desktop2.locator('.model-picker option').allInnerTexts();
-check(
-  'model picker lists multiple providers',
-  pickerValues.some((v) => v.includes('Anthropic')) && pickerValues.some((v) => v.includes('OpenAI'))
-);
+await desktop2.locator('.model-picker').click();
+await desktop2.waitForSelector('[role="listbox"]', { timeout: 5000 });
+const pickerText = await desktop2.locator('[role="listbox"]').innerText();
+await desktop2.keyboard.press('Escape');
+check('model picker lists multiple providers', pickerText.includes('Anthropic') && pickerText.includes('OpenAI'));
 
 await browser.close();
 console.log(`\n${results.filter((r) => r.ok).length}/${results.length} checks passed`);

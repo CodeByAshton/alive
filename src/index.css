@@ -1,0 +1,142 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Vault — visual system v2
+   Light mode. Black / white / grays only. shadcn (neutral) tokens.
+   Inspiration: Linear, Notion, Apple — rounded corners, hairlines,
+   glass panels, no ornament.
+   ───────────────────────────────────────────────────────────────────────── */
+
+:root {
+  --radius: 0.75rem;
+
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.955 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.912 0 0);
+  --input: oklch(0.902 0 0);
+  --ring: oklch(0.708 0 0);
+
+  /* app canvas — the soft gray everything floats on */
+  --canvas: oklch(0.972 0 0);
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-canvas: var(--canvas);
+
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI', Inter, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    color-scheme: light;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+  }
+  body {
+    @apply bg-canvas text-foreground font-sans text-[13.5px] antialiased;
+    overflow: hidden;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection {
+    @apply bg-neutral-200;
+  }
+}
+
+/* ── markdown prose — Notion-style reading view ───────────────────────── */
+.markdown {
+  @apply text-[15px] leading-[1.65] text-neutral-800;
+}
+.markdown > :first-child { margin-top: 0; }
+.markdown > :last-child { margin-bottom: 0; }
+.markdown h1 { @apply mt-8 mb-3 text-[1.9em] font-bold tracking-tight text-neutral-900 leading-tight; }
+.markdown h2 { @apply mt-7 mb-2 text-[1.4em] font-semibold tracking-tight text-neutral-900 leading-snug; }
+.markdown h3 { @apply mt-5 mb-1.5 text-[1.15em] font-semibold text-neutral-900; }
+.markdown p { @apply my-2; }
+.markdown ul { @apply my-2 list-disc pl-6; }
+.markdown ol { @apply my-2 list-decimal pl-6; }
+.markdown li { @apply my-1; }
+.markdown li::marker { @apply text-neutral-400; }
+.markdown blockquote { @apply my-3 border-l-[3px] border-neutral-300 pl-4 text-neutral-600; }
+.markdown pre { @apply my-3 overflow-x-auto rounded-xl border bg-neutral-50 p-4 text-[13px]; }
+.markdown code { @apply font-mono text-[0.875em]; }
+.markdown :not(pre) > code { @apply rounded-md border bg-neutral-100 px-1.5 py-px text-neutral-800; }
+.markdown a { @apply text-neutral-900 underline decoration-neutral-300 underline-offset-2 hover:decoration-neutral-500; }
+.markdown a.wikilink { @apply rounded-sm bg-neutral-100 px-1 py-px no-underline font-medium text-neutral-900 hover:bg-neutral-200 transition-colors; }
+.markdown hr { @apply my-6 border-neutral-200; }
+.markdown table { @apply my-3 w-full border-collapse text-[13.5px]; }
+.markdown th { @apply border-b-2 border-neutral-200 px-3 py-1.5 text-left font-semibold; }
+.markdown td { @apply border-b border-neutral-100 px-3 py-1.5; }
+.markdown input[type='checkbox'] { @apply mr-1.5 accent-neutral-800; }
+
+/* compact variant inside chat bubbles */
+.markdown-sm { @apply text-[13.5px] leading-normal; }
+.markdown-sm h1 { @apply mt-3 mb-1.5 text-base; }
+.markdown-sm h2 { @apply mt-3 mb-1 text-[15px]; }
+.markdown-sm h3 { @apply mt-2 mb-1 text-sm; }
+.markdown-sm pre { @apply my-2 p-3 rounded-lg; }
+
+/* ── CodeMirror (edit mode) ───────────────────────────────────────────── */
+.editor-cm .cm-editor { height: 100%; background: transparent; }
+.editor-cm .cm-editor.cm-focused { outline: none; }
+.editor-cm .cm-content {
+  @apply mx-auto max-w-[72ch] py-6 px-8 font-mono text-[13.5px] leading-[1.7] text-neutral-800;
+  caret-color: oklch(0.205 0 0);
+  padding-bottom: 40vh;
+}
+.editor-cm .cm-line { padding: 0; }
+.editor-cm .cm-gutters { display: none; }
+.editor-cm .cm-selectionBackground { background: oklch(0.9 0 0) !important; }
+
+/* thin quiet scrollbars for plain overflow areas */
+.quiet-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.quiet-scroll::-webkit-scrollbar-thumb {
+  background: oklch(0.87 0 0);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.quiet-scroll::-webkit-scrollbar-track { background: transparent; }

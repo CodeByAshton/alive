@@ -1,51 +1,50 @@
-// Left navigation: a narrow icon rail (Files / Chats / Skills / Devices)
-// driving a sidebar panel — plus the live connection state.
+// Sidebar: create actions at the top, menu items (Files / Chats / Skills /
+// Devices), and the active section below. Notion/Linear-flavored — rows on a
+// soft gray canvas, hairlines, rounded corners.
 
 import { useMemo, useState } from 'react';
+import {
+  ChevronRight,
+  FileText,
+  Folder,
+  FolderOpen,
+  FolderPlus,
+  MessageSquare,
+  MonitorSmartphone,
+  MoreHorizontal,
+  PencilLine,
+  Plus,
+  SquarePen,
+  Trash2,
+  Zap,
+} from 'lucide-react';
+
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
 import { useVault } from '../lib/store';
 import { deletePath, movePath, putRecord } from '../lib/sync';
 import { createChat, getChatConfig, listChats } from '../lib/chat';
 import { parseFrontmatter, serializeFrontmatter } from '../../shared/frontmatter.mjs';
 import type { VaultRecord } from '../lib/types';
-import { Icon } from './Icon';
+import { ConfirmDialog, NameDialog, type ConfirmPrompt, type NamePrompt } from './dialogs';
 
-/* ── icon rail ─────────────────────────────────────────────────────────── */
+/* ── shared dialog state, exposed to panels via callbacks ─────────────── */
 
-const TABS = [
-  { id: 'files', icon: 'folder', label: 'Files' },
-  { id: 'chats', icon: 'chat', label: 'Chats' },
-  { id: 'skills', icon: 'skill', label: 'Skills' },
-  { id: 'devices', icon: 'devices', label: 'Devices' },
-] as const;
-
-function Rail() {
-  const railTab = useVault((s) => s.railTab);
-  const setRailTab = useVault((s) => s.setRailTab);
-  const connected = useVault((s) => s.connected);
-  const presence = useVault((s) => s.presence);
-  const activeDevices = presence.filter((d) => d.state === 'active').length;
-
-  return (
-    <nav className="rail">
-      <div className={`rail-mark ${connected ? 'on' : 'off'}`} title={connected ? 'Synced' : 'Offline'}>
-        V
-      </div>
-      {TABS.map((t) => (
-        <button
-          key={t.id}
-          className={`rail-tab ${railTab === t.id ? 'active' : ''}`}
-          title={t.label}
-          onClick={() => setRailTab(t.id)}
-        >
-          <Icon name={t.icon} />
-          {t.id === 'devices' && activeDevices > 0 && <span className="rail-badge">{activeDevices}</span>}
-        </button>
-      ))}
-    </nav>
-  );
+interface DialogApi {
+  ask: (prompt: NamePrompt) => void;
+  confirm: (prompt: ConfirmPrompt) => void;
 }
 
-/* ── files panel ───────────────────────────────────────────────────────── */
+/* ── tree ─────────────────────────────────────────────────────────────── */
 
 interface TreeNode {
   path: string;
@@ -60,15 +59,9 @@ function buildTree(records: Map<string, VaultRecord>): TreeNode[] {
   const sorted = [...records.values()].sort((a, b) => a.path.localeCompare(b.path));
 
   for (const rec of sorted) {
-    const node: TreeNode = {
-      path: rec.path,
-      name: rec.path.split('/').pop()!,
-      type: rec.type,
-      children: [],
-    };
+    const node: TreeNode = { path: rec.path, name: rec.path.split('/').pop()!, type: rec.type, children: [] };
     byPath.set(rec.path, node);
-    const parentPath = rec.path.split('/').slice(0, -1).join('/');
-    const parent = byPath.get(parentPath);
+    const parent = byPath.get(rec.path.split('/').slice(0, -1).join('/'));
     if (parent) parent.children.push(node);
     else roots.push(node);
   }
@@ -81,71 +74,114 @@ function buildTree(records: Map<string, VaultRecord>): TreeNode[] {
   return roots;
 }
 
-function Node({ node, depth }: { node: TreeNode; depth: number }) {
+function Node({ node, depth, dialogs }: { node: TreeNode; depth: number; dialogs: DialogApi }) {
   const activePath = useVault((s) => s.activePath);
-  const setActivePath = useVault((s) => s.setActivePath);
+  const openFile = useVault((s) => s.openFile);
   const setActiveChat = useVault((s) => s.setActiveChat);
   const [open, setOpen] = useState(depth < 1);
 
   const isChat = /^chats\/[^/]+$/.test(node.path);
+  const active = activePath === node.path;
 
   const onClick = () => {
     if (isChat) setActiveChat(node.path);
     else if (node.type === 'folder') setOpen(!open);
-    else setActivePath(node.path);
+    else openFile(node.path, 'read');
   };
+
+  const IconComp = isChat ? MessageSquare : node.type === 'folder' ? (open ? FolderOpen : Folder) : FileText;
 
   return (
     <div>
       <div
-        className={`tree-row ${activePath === node.path ? 'active' : ''}`}
-        style={{ paddingLeft: 8 + depth * 13 }}
+        className={cn(
+          'tree-row group flex h-7 cursor-pointer items-center gap-1.5 rounded-lg pr-1 text-[13px] text-neutral-600 transition-colors select-none',
+          'hover:bg-neutral-200/55 hover:text-neutral-900',
+          active && 'bg-white text-neutral-900 shadow-xs'
+        )}
+        style={{ paddingLeft: 8 + depth * 14 }}
         onClick={onClick}
       >
-        <span className="tree-icon">
-          <Icon name={isChat ? 'chat' : node.type === 'folder' ? (open ? 'folderOpen' : 'folder') : 'file'} size={13} />
-        </span>
-        <span className="tree-name">{node.name.replace(/\.md$/, '')}</span>
-        <span className="tree-actions" onClick={(e) => e.stopPropagation()}>
-          {node.type === 'folder' && !isChat && (
-            <button
-              title="New note here"
-              onClick={async () => {
-                const name = prompt('Note name');
-                if (!name) return;
-                const path = `${node.path}/${name.replace(/\.md$/, '')}.md`;
-                await putRecord(path, 'file', `# ${name}\n`);
-                setActivePath(path);
-                setOpen(true);
-              }}
-            >
-              +
-            </button>
-          )}
-          <button
-            title="Rename / move"
-            onClick={async () => {
-              const to = prompt('New path', node.path);
-              if (!to || to === node.path) return;
-              await movePath(node.path, to.replace(/\.md$/, '') + (node.type === 'file' ? '.md' : ''));
-            }}
-          >
-            ✎
-          </button>
-          <button
-            title="Delete"
-            onClick={async () => {
-              if (confirm(`Delete ${node.path}?`)) await deletePath(node.path);
-            }}
-          >
-            ×
-          </button>
+        {node.type === 'folder' && !isChat ? (
+          <ChevronRight
+            className={cn('size-3 shrink-0 text-neutral-400 transition-transform duration-150', open && 'rotate-90')}
+          />
+        ) : (
+          <span className="w-3 shrink-0" />
+        )}
+        <IconComp className="size-[15px] shrink-0 text-neutral-400" />
+        <span className="tree-name flex-1 truncate">{node.name.replace(/\.md$/, '')}</span>
+        <span onClick={(e) => e.stopPropagation()}>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="size-6 opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100"
+                title="Actions"
+              >
+                <MoreHorizontal className="size-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-44">
+              {node.type === 'folder' && !isChat && (
+                <>
+                  <DropdownMenuItem
+                    onClick={() =>
+                      dialogs.ask({
+                        title: 'New note',
+                        placeholder: 'Note name',
+                        onSubmit: async (name) => {
+                          const path = `${node.path}/${name.replace(/\.md$/, '')}.md`;
+                          await putRecord(path, 'file', `# ${name}\n`);
+                          openFile(path, 'edit');
+                          setOpen(true);
+                        },
+                      })
+                    }
+                  >
+                    <Plus /> New note inside
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              )}
+              <DropdownMenuItem
+                onClick={() =>
+                  dialogs.ask({
+                    title: 'Rename / move',
+                    description: 'Edit the full path to rename or move.',
+                    initial: node.path,
+                    action: 'Save',
+                    onSubmit: async (to) => {
+                      if (to === node.path) return;
+                      await movePath(node.path, to.replace(/\.md$/, '') + (node.type === 'file' ? '.md' : ''));
+                    },
+                  })
+                }
+              >
+                <PencilLine /> Rename / move
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                variant="destructive"
+                onClick={() =>
+                  dialogs.confirm({
+                    title: `Delete ${node.name.replace(/\.md$/, '')}?`,
+                    description:
+                      node.type === 'folder' ? 'Everything inside this folder will be deleted.' : undefined,
+                    onConfirm: () => deletePath(node.path),
+                  })
+                }
+              >
+                <Trash2 /> Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </span>
       </div>
       {node.type === 'folder' && open && !isChat && (
         <div>
           {node.children.map((child) => (
-            <Node key={child.path} node={child} depth={depth + 1} />
+            <Node key={child.path} node={child} depth={depth + 1} dialogs={dialogs} />
           ))}
         </div>
       )}
@@ -153,91 +189,19 @@ function Node({ node, depth }: { node: TreeNode; depth: number }) {
   );
 }
 
-function FilesPanel() {
+function FilesSection({ dialogs }: { dialogs: DialogApi }) {
   const records = useVault((s) => s.records);
-  const setActivePath = useVault((s) => s.setActivePath);
   const tree = useMemo(() => buildTree(records), [records]);
-
   return (
-    <>
-      <div className="panel-header">
-        <span>Files</span>
-        <div className="panel-actions">
-          <button
-            title="New note"
-            onClick={async () => {
-              const name = prompt('Note name');
-              if (!name) return;
-              const path = `notes/${name.replace(/\.md$/, '')}.md`;
-              await putRecord(path, 'file', `# ${name}\n`);
-              setActivePath(path);
-            }}
-          >
-            <Icon name="file" size={13} /> +
-          </button>
-          <button
-            title="New folder"
-            onClick={async () => {
-              const name = prompt('Folder name');
-              if (name) await putRecord(name, 'folder');
-            }}
-          >
-            <Icon name="folder" size={13} /> +
-          </button>
-        </div>
-      </div>
-      <div className="tree">
-        {tree.map((node) => (
-          <Node key={node.path} node={node} depth={0} />
-        ))}
-      </div>
-    </>
+    <div className="tree flex flex-col gap-px">
+      {tree.map((node) => (
+        <Node key={node.path} node={node} depth={0} dialogs={dialogs} />
+      ))}
+    </div>
   );
 }
 
-/* ── chats panel ───────────────────────────────────────────────────────── */
-
-function ChatsPanel() {
-  const records = useVault((s) => s.records);
-  const activeChat = useVault((s) => s.activeChat);
-  const setActiveChat = useVault((s) => s.setActiveChat);
-  const chats = useMemo(() => listChats(records), [records]);
-
-  return (
-    <>
-      <div className="panel-header">
-        <span>Chats</span>
-        <div className="panel-actions">
-          <button
-            title="New chat"
-            onClick={async () => {
-              const config = activeChat
-                ? getChatConfig(records, activeChat)
-                : { provider: 'anthropic', model: 'claude-opus-4-8' };
-              setActiveChat(await createChat(config));
-            }}
-          >
-            <Icon name="plus" size={13} /> New
-          </button>
-        </div>
-      </div>
-      <div className="panel-list">
-        {chats.map((c) => (
-          <div
-            key={c.path}
-            className={`panel-row ${activeChat === c.path ? 'active' : ''}`}
-            onClick={() => setActiveChat(c.path)}
-          >
-            <Icon name="chat" size={13} />
-            <span className="panel-row-title">{c.title}</span>
-            <span className="panel-row-meta mono">{timeAgo(c.mtime)}</span>
-          </div>
-        ))}
-        {!chats.length && <div className="panel-empty">No chats yet.</div>}
-      </div>
-    </>
-  );
-}
+/* ── chats ────────────────────────────────────────────────────────────── */
 
 function timeAgo(ts: number): string {
   const s = Math.max(1, Math.round((Date.now() - ts) / 1000));
@@ -247,7 +211,35 @@ function timeAgo(ts: number): string {
   return `${Math.round(s / 86400)}d`;
 }
 
-/* ── skills panel ──────────────────────────────────────────────────────── */
+function ChatsSection() {
+  const records = useVault((s) => s.records);
+  const activeChat = useVault((s) => s.activeChat);
+  const setActiveChat = useVault((s) => s.setActiveChat);
+  const chats = useMemo(() => listChats(records), [records]);
+
+  return (
+    <div className="panel-list flex flex-col gap-px">
+      {chats.map((c) => (
+        <div
+          key={c.path}
+          className={cn(
+            'panel-row flex h-8 cursor-pointer items-center gap-2 rounded-lg px-2 text-[13px] text-neutral-600 transition-colors select-none',
+            'hover:bg-neutral-200/55 hover:text-neutral-900',
+            activeChat === c.path && 'bg-white text-neutral-900 shadow-xs'
+          )}
+          onClick={() => setActiveChat(c.path)}
+        >
+          <MessageSquare className="size-[15px] shrink-0 text-neutral-400" />
+          <span className="flex-1 truncate">{c.title}</span>
+          <span className="font-mono text-[10px] text-neutral-400">{timeAgo(c.mtime)}</span>
+        </div>
+      ))}
+      {!chats.length && <div className="px-2 py-4 text-xs text-neutral-400">No chats yet.</div>}
+    </div>
+  );
+}
+
+/* ── skills ───────────────────────────────────────────────────────────── */
 
 const SKILL_TEMPLATE = (name: string, trigger: string) =>
   serializeFrontmatter(
@@ -255,10 +247,10 @@ const SKILL_TEMPLATE = (name: string, trigger: string) =>
     'Instructions the assistant follows when this skill is invoked. Write them like you would brief a colleague.\n'
   );
 
-function SkillsPanel() {
+function SkillsSection() {
   const records = useVault((s) => s.records);
   const activePath = useVault((s) => s.activePath);
-  const setActivePath = useVault((s) => s.setActivePath);
+  const openFile = useVault((s) => s.openFile);
 
   const skills = useMemo(() => {
     const out: { path: string; name: string; trigger: string; description: string }[] = [];
@@ -276,91 +268,219 @@ function SkillsPanel() {
   }, [records]);
 
   return (
-    <>
-      <div className="panel-header">
-        <span>Skills</span>
-        <div className="panel-actions">
-          <button
-            title="New skill"
-            onClick={async () => {
-              const name = prompt('Skill name (the trigger becomes /name)');
-              if (!name) return;
-              const slug = name.toLowerCase().replace(/[^a-z0-9-]+/g, '-');
-              const path = `skills/${slug}.md`;
-              await putRecord(path, 'file', SKILL_TEMPLATE(name, `/${slug}`));
-              setActivePath(path);
-            }}
-          >
-            <Icon name="plus" size={13} /> New
-          </button>
-        </div>
-      </div>
-      <div className="panel-list">
-        {skills.map((s) => (
-          <div
-            key={s.path}
-            className={`panel-row tall ${activePath === s.path ? 'active' : ''}`}
-            onClick={() => setActivePath(s.path)}
-          >
-            <Icon name="skill" size={13} />
-            <span className="panel-row-title">
-              {s.name}
-              <span className="panel-row-sub">
-                <span className="mono">{s.trigger}</span> — {s.description}
-              </span>
+    <div className="panel-list flex flex-col gap-px">
+      {skills.map((s) => (
+        <div
+          key={s.path}
+          className={cn(
+            'panel-row flex cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 text-[13px] text-neutral-600 transition-colors select-none',
+            'hover:bg-neutral-200/55 hover:text-neutral-900',
+            activePath === s.path && 'bg-white text-neutral-900 shadow-xs'
+          )}
+          onClick={() => openFile(s.path, 'read')}
+        >
+          <Zap className="mt-0.5 size-[15px] shrink-0 text-neutral-400" />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate font-medium">{s.name}</span>
+            <span className="block truncate text-[11px] text-neutral-400">
+              <span className="font-mono">{s.trigger}</span> · {s.description}
             </span>
-          </div>
-        ))}
-        {!skills.length && <div className="panel-empty">No skills yet — they're just files in skills/.</div>}
-      </div>
-      <div className="panel-footnote">Skills are vault files. Invoke one in chat with its slash command.</div>
-    </>
+          </span>
+        </div>
+      ))}
+      {!skills.length && <div className="px-2 py-4 text-xs text-neutral-400">No skills yet.</div>}
+      <p className="px-2 pt-3 text-[11px] leading-relaxed text-neutral-400">
+        Skills are vault files — invoke one in chat with its slash command.
+      </p>
+    </div>
   );
 }
 
-/* ── devices panel ─────────────────────────────────────────────────────── */
+/* ── devices ──────────────────────────────────────────────────────────── */
 
-function DevicesPanel() {
+function DevicesSection() {
   const presence = useVault((s) => s.presence);
-
   return (
-    <>
-      <div className="panel-header">
-        <span>Devices</span>
-      </div>
-      <div className="presence-panel">
-        {presence.map((d) => (
-          <div key={d.deviceId} className="presence-row">
-            <span className={`presence-state ${d.state}`}>●</span>
-            <span className="mono">{d.deviceId}</span>
-            <span className="presence-state">{d.state === 'active' ? d.deviceType : 'away'}</span>
-          </div>
-        ))}
-        {presence.length === 0 && <div className="presence-row dim">no devices</div>}
-      </div>
-      <div className="panel-footnote">
-        What the assistant can do is assembled from the devices that are on right now — phones keep it
-        conversational, a desktop lets it edit the vault, and a connected machine lets it run commands.
-        <div className="panel-code mono">npm run node-harness -- --workspace ~/dev</div>
-        turns a computer into one of those machines.
-      </div>
-    </>
+    <div className="presence-panel flex flex-col gap-px">
+      {presence.map((d) => (
+        <div key={d.deviceId} className="presence-row flex h-8 items-center gap-2 rounded-lg px-2 text-[13px]">
+          <span
+            className={cn('size-1.5 rounded-full', d.state === 'active' ? 'bg-neutral-800' : 'bg-neutral-300')}
+          />
+          <span className="flex-1 truncate font-mono text-xs text-neutral-600">{d.deviceId}</span>
+          <span className="text-[11px] text-neutral-400">{d.state === 'active' ? d.deviceType : 'away'}</span>
+        </div>
+      ))}
+      {presence.length === 0 && <div className="presence-row px-2 py-4 text-xs text-neutral-400">no devices</div>}
+      <p className="px-2 pt-3 text-[11px] leading-relaxed text-neutral-400">
+        What the assistant can do is assembled from the devices that are on right now. Turn a computer into one:
+      </p>
+      <code className="mx-2 mt-1.5 block overflow-x-auto rounded-lg border bg-white px-2.5 py-1.5 font-mono text-[11px] whitespace-nowrap text-neutral-600">
+        npm run node-harness
+      </code>
+    </div>
   );
 }
 
-/* ── container ─────────────────────────────────────────────────────────── */
+/* ── container ────────────────────────────────────────────────────────── */
+
+const MENU = [
+  { id: 'files', icon: Folder, label: 'Files' },
+  { id: 'chats', icon: MessageSquare, label: 'Chats' },
+  { id: 'skills', icon: Zap, label: 'Skills' },
+  { id: 'devices', icon: MonitorSmartphone, label: 'Devices' },
+] as const;
 
 export function Sidebar() {
   const railTab = useVault((s) => s.railTab);
+  const setRailTab = useVault((s) => s.setRailTab);
+  const connected = useVault((s) => s.connected);
+  const presence = useVault((s) => s.presence);
+  const openFile = useVault((s) => s.openFile);
+  const setActiveChat = useVault((s) => s.setActiveChat);
+  const records = useVault((s) => s.records);
+
+  const [namePrompt, setNamePrompt] = useState<NamePrompt | null>(null);
+  const [confirmPrompt, setConfirmPrompt] = useState<ConfirmPrompt | null>(null);
+  const dialogs: DialogApi = { ask: setNamePrompt, confirm: setConfirmPrompt };
+
+  const activeDevices = presence.filter((d) => d.state === 'active').length;
+
+  const newNote = () =>
+    dialogs.ask({
+      title: 'New note',
+      placeholder: 'Note name',
+      onSubmit: async (name) => {
+        const path = `notes/${name.replace(/\.md$/, '')}.md`;
+        await putRecord(path, 'file', `# ${name}\n`);
+        openFile(path, 'edit');
+        setRailTab('files');
+      },
+    });
+
+  const newFolder = () =>
+    dialogs.ask({
+      title: 'New folder',
+      placeholder: 'Folder name',
+      onSubmit: async (name) => {
+        await putRecord(name, 'folder');
+        setRailTab('files');
+      },
+    });
+
+  const newSkill = () =>
+    dialogs.ask({
+      title: 'New skill',
+      description: 'The trigger becomes /name.',
+      placeholder: 'Skill name',
+      onSubmit: async (name) => {
+        const slug = name.toLowerCase().replace(/[^a-z0-9-]+/g, '-');
+        const path = `skills/${slug}.md`;
+        await putRecord(path, 'file', SKILL_TEMPLATE(name, `/${slug}`));
+        openFile(path, 'edit');
+      },
+    });
+
+  const newChat = async () => {
+    const config = { provider: 'anthropic', model: 'claude-opus-4-8' };
+    setActiveChat(await createChat(getChatConfigSafe(records) ?? config));
+  };
+
   return (
-    <div className="left-nav">
-      <Rail />
-      <aside className="sidebar">
-        {railTab === 'files' && <FilesPanel />}
-        {railTab === 'chats' && <ChatsPanel />}
-        {railTab === 'skills' && <SkillsPanel />}
-        {railTab === 'devices' && <DevicesPanel />}
-      </aside>
-    </div>
+    <aside className="sidebar flex w-60 shrink-0 flex-col px-3 pt-3 pb-2">
+      {/* header + create actions at the top */}
+      <div className="mb-3 flex items-center gap-2 px-1">
+        <span className="text-sm font-semibold tracking-tight">Vault</span>
+        <span
+          className={cn('sync-dot size-1.5 rounded-full', connected ? 'on bg-neutral-800' : 'off bg-neutral-300')}
+          title={connected ? 'Synced' : 'Offline'}
+        />
+        <span className="flex-1" />
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon-sm" title="New note" onClick={newNote}>
+              <SquarePen className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>New note</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon-sm" title="New folder" onClick={newFolder}>
+              <FolderPlus className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>New folder</TooltipContent>
+        </Tooltip>
+      </div>
+
+      {/* menu items */}
+      <nav className="mb-2 flex flex-col gap-px">
+        {MENU.map((item) => (
+          <button
+            key={item.id}
+            title={item.label}
+            className={cn(
+              'nav-item group flex h-8 cursor-pointer items-center gap-2.5 rounded-lg px-2 text-[13px] font-medium text-neutral-600 transition-colors select-none',
+              'hover:bg-neutral-200/55 hover:text-neutral-900',
+              railTab === item.id && 'bg-white text-neutral-900 shadow-xs'
+            )}
+            onClick={() => setRailTab(item.id)}
+          >
+            <item.icon className="size-4 text-neutral-400" />
+            <span className="flex-1 text-left">{item.label}</span>
+            {item.id === 'devices' && activeDevices > 0 && (
+              <Badge variant="secondary" className="h-4 min-w-4 px-1 font-mono text-[10px]">
+                {activeDevices}
+              </Badge>
+            )}
+            {item.id === 'chats' && (
+              <span
+                role="button"
+                title="New chat"
+                className="rounded-md p-0.5 text-neutral-400 opacity-0 transition-opacity hover:text-neutral-900 group-hover:opacity-100 hover:opacity-100"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  newChat();
+                }}
+              >
+                <Plus className="size-3.5" />
+              </span>
+            )}
+            {item.id === 'skills' && (
+              <span
+                role="button"
+                title="New skill"
+                className="rounded-md p-0.5 text-neutral-400 opacity-0 transition-opacity group-hover:opacity-100 hover:text-neutral-900"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  newSkill();
+                }}
+              >
+                <Plus className="size-3.5" />
+              </span>
+            )}
+          </button>
+        ))}
+      </nav>
+
+      <div className="mx-1 mb-2 h-px bg-neutral-200/70" />
+
+      {/* active section */}
+      <div className="quiet-scroll -mx-1 flex-1 overflow-y-auto px-1">
+        {railTab === 'files' && <FilesSection dialogs={dialogs} />}
+        {railTab === 'chats' && <ChatsSection />}
+        {railTab === 'skills' && <SkillsSection />}
+        {railTab === 'devices' && <DevicesSection />}
+      </div>
+
+      <NameDialog prompt={namePrompt} onClose={() => setNamePrompt(null)} />
+      <ConfirmDialog prompt={confirmPrompt} onClose={() => setConfirmPrompt(null)} />
+    </aside>
   );
+}
+
+function getChatConfigSafe(records: Map<string, VaultRecord>) {
+  const chats = listChats(records);
+  return chats.length ? getChatConfig(records, chats[0].path) : null;
 }
