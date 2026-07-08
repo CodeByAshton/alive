@@ -181,18 +181,75 @@ await phone.waitForTimeout(1500);
 
 await phone.locator('.composer textarea').fill('run command echo vault-node-ok');
 await phone.locator('.composer .send').click();
+
+// 13a. TRUST BOUNDARY: the command doesn't run until a human approves it
+// on a screen (voice-initiated, screen-confirmed).
+const sawApprovalCard = await phone
+  .waitForSelector('.approval-card', { timeout: 8000 })
+  .then(() => true)
+  .catch(() => false);
+check('command waits for on-screen approval', sawApprovalCard);
+await phone.locator('.approval-card .approve').click();
 await phone.waitForTimeout(3000);
 lastReply = await phone.locator('.bubble.assistant').last().innerText();
-check('node harness online: assistant runs the command', lastReply.includes('vault-node-ok') && lastReply.includes('Ran it'), lastReply.slice(0, 90));
+check('node harness online: approved command runs', lastReply.includes('vault-node-ok') && lastReply.includes('Ran it'), lastReply.slice(0, 90));
 
-// 13a. VOICE PIPELINE: speak on the phone -> command executes on the laptop
-// node -> reply is spoken back (TTS). STT/TTS stubbed; everything between is real.
+// 13b. Denying the approval blocks the command; the model is told and adapts.
+await phone.locator('.composer textarea').fill('run command echo should-be-denied');
+await phone.locator('.composer .send').click();
+await phone.waitForSelector('.approval-card', { timeout: 8000 });
+await phone.locator('.approval-card .deny').click();
+await phone.waitForTimeout(2500);
+lastReply = await phone.locator('.bubble.assistant').last().innerText();
+check('denied command never runs', lastReply.includes('declined') && !lastReply.includes('Ran it'), lastReply.slice(0, 90));
+
+// 13c. MODES: switch the default mode to Auto in Settings (desktop) —
+// commands now run unattended, with no approval card, on every device.
+await desktop2.locator('button[title="Settings"]').click();
+await desktop2.waitForSelector('.settings-dialog', { timeout: 5000 });
+await desktop2.locator('.mode-select').click();
+await desktop2.locator('[role="option"]', { hasText: 'Auto' }).click();
+await desktop2.locator('.settings-dialog button', { hasText: 'Cancel' }).click();
+await phone.waitForTimeout(600);
+await phone.locator('.composer textarea').fill('run command echo auto-mode-ok');
+await phone.locator('.composer .send').click();
+await phone.waitForTimeout(3000);
+lastReply = await phone.locator('.bubble.assistant').last().innerText();
+const autoCards = await phone.locator('.approval-card').count();
+check('auto mode runs commands without asking', lastReply.includes('auto-mode-ok') && autoCards === 0, lastReply.slice(0, 90));
+
+// Back to Ask-first for the voice test below.
+await desktop2.locator('button[title="Settings"]').click();
+await desktop2.waitForSelector('.settings-dialog', { timeout: 5000 });
+await desktop2.locator('.mode-select').click();
+await desktop2.locator('[role="option"]', { hasText: 'Ask first' }).click();
+await desktop2.locator('.settings-dialog button', { hasText: 'Cancel' }).click();
+await phone.waitForTimeout(600);
+
+// 13d. VOICE PIPELINE: speak on the phone -> approval card confirms on-screen
+// -> command executes on the laptop node -> reply is spoken back (TTS).
+// STT/TTS stubbed; everything between is real.
 await phone.locator('.phone-voice .mic').click();
+await phone.waitForSelector('.approval-card', { timeout: 8000 });
+await phone.locator('.approval-card .approve').click();
 await phone.waitForTimeout(3500);
 lastReply = await phone.locator('.bubble.assistant').last().innerText();
 const spoken = await phone.evaluate(() => window.__spoken);
 check('voice: spoken request runs on the connected machine', lastReply.includes('voice-pipeline-ok'), lastReply.slice(0, 70));
 check('voice: assistant reply is spoken back (TTS)', Array.isArray(spoken) && spoken.some((t) => t.includes('Ran it')), (spoken || []).join(' | ').slice(0, 60));
+
+// 13e. KILL SWITCH: pausing from the Devices panel stops the assistant
+// everywhere; resuming brings it back.
+await desktop2.locator('.nav-item[title="Devices"]').click();
+await desktop2.waitForSelector('.pause-row', { timeout: 5000 });
+await desktop2.locator('.pause-row [role="switch"]').click();
+await phone.waitForTimeout(600);
+const pausedOnPhone = await phone.locator('.composer textarea').isDisabled();
+check('kill switch: pausing on desktop disables the phone composer', pausedOnPhone);
+await desktop2.locator('.pause-row [role="switch"]').click();
+await phone.waitForTimeout(600);
+const resumedOnPhone = await phone.locator('.composer textarea').isEnabled();
+check('kill switch: resuming re-enables every surface', resumedOnPhone);
 node.kill();
 
 // 13b. CONNECTORS: an MCP server plugged in via Customize -> Connectors

@@ -46,3 +46,14 @@ export interface ChatMessage {
   toolsUsed?: string[];
   filesTouched?: string[];
 }
+
+// Permission modes, Claude-style: confirm each command, run unattended, or
+// never run commands at all.
+export type AssistantMode = 'ask' | 'auto' | 'readonly';
+
+export interface ApprovalRequest {
+  id: string;
+  chatPath: string;
+  command: string;
+  cwd: string | null;
+}

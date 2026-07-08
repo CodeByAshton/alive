@@ -77,6 +77,62 @@ const conns = new Map(); // connId -> { ws, descriptor }
 const pendingExec = new Map(); // execId -> { resolve, reject, timer }
 let execSeq = 0;
 
+// Kill switch: any authed surface can pause the assistant entirely.
+let assistantPaused = false;
+
+// Permission modes, Claude-style. 'ask' confirms every command on-screen
+// before it runs, 'auto' runs commands unattended, 'readonly' refuses them
+// outright. The default is a vault setting (.vault/settings.json) so every
+// device — and every future session — agrees on it.
+const SETTINGS_PATH = '.vault/settings.json';
+const MODES = ['ask', 'auto', 'readonly'];
+
+function readSettings() {
+  try {
+    return JSON.parse(store.get(SETTINGS_PATH)?.content ?? '{}') || {};
+  } catch {
+    return {};
+  }
+}
+
+let assistantMode = MODES.includes(readSettings().mode) ? readSettings().mode : 'ask';
+
+function setAssistantMode(mode) {
+  if (!MODES.includes(mode)) return;
+  assistantMode = mode;
+  store.put({ path: SETTINGS_PATH, type: 'file', content: JSON.stringify({ ...readSettings(), mode }) });
+  broadcast({ type: 'mode', mode });
+}
+
+// Per-command approval — voice-initiated, screen-confirmed. Before a
+// run_command executes, every active surface gets an approval card; the
+// command runs only after a human approves it. Deny or 60s of silence
+// rejects the tool call (the model is told, and adapts).
+const pendingApprovals = new Map(); // approvalId -> { resolve, timer }
+let approvalSeq = 0;
+
+function requestApproval({ chatPath, command, cwd }) {
+  return new Promise((resolve) => {
+    const id = `appr-${++approvalSeq}`;
+    const timer = setTimeout(() => {
+      pendingApprovals.delete(id);
+      broadcast({ type: 'approval_resolved', id, approved: false });
+      resolve(false);
+    }, 60_000);
+    pendingApprovals.set(id, { resolve, timer });
+    broadcast({ type: 'approval_request', id, chatPath, command, cwd: cwd ?? null });
+  });
+}
+
+function resolveApproval(id, approved) {
+  const pending = pendingApprovals.get(id);
+  if (!pending) return;
+  pendingApprovals.delete(id);
+  clearTimeout(pending.timer);
+  broadcast({ type: 'approval_resolved', id, approved: Boolean(approved) });
+  pending.resolve(Boolean(approved));
+}
+
 function execRemote(name, input) {
   const target = [...conns.entries()].find(([connId, c]) => {
     const live = presence.devices.get(connId);
@@ -102,16 +158,26 @@ wss.on('connection', (ws, req) => {
     return;
   }
   const connId = `conn-${++connSeq}`;
+  // Capabilities are assigned server-side from the device type — a client
+  // cannot self-declare what it is allowed to do.
+  // TODO: trust boundary — the device *type* is still client-declared; full
+  // attestation means pairing/approving new devices before they get any caps.
+  const CAPS_BY_TYPE = {
+    phone: ['read', 'voice'],
+    desktop: ['read', 'write'],
+    node: ['read', 'write', 'exec'],
+  };
+  const deviceType = params.get('deviceType') || 'desktop';
   const descriptor = {
     deviceId: params.get('deviceId') || connId,
-    deviceType: params.get('deviceType') || 'desktop',
-    capabilities: (params.get('caps') || 'read').split(',').filter(Boolean),
+    deviceType,
+    capabilities: CAPS_BY_TYPE[deviceType] ?? ['read'],
   };
 
   sockets.add(ws);
   conns.set(connId, { ws, descriptor });
   presence.join(connId, descriptor);
-  ws.send(JSON.stringify({ type: 'hello', presence: presence.snapshot(), rev: store.rev }));
+  ws.send(JSON.stringify({ type: 'hello', presence: presence.snapshot(), rev: store.rev, paused: assistantPaused, mode: assistantMode }));
 
   ws.on('message', async (raw) => {
     let msg;
@@ -137,6 +203,16 @@ wss.on('connection', (ws, req) => {
         case 'presence_state':
           presence.setState(connId, msg.state === 'background' ? 'background' : 'active');
           break;
+        case 'approval_response':
+          resolveApproval(String(msg.id), Boolean(msg.approved));
+          break;
+        case 'set_paused':
+          assistantPaused = Boolean(msg.paused);
+          broadcast({ type: 'paused', paused: assistantPaused });
+          break;
+        case 'set_mode':
+          setAssistantMode(String(msg.mode));
+          break;
         case 'tool_exec_result': {
           const pending = pendingExec.get(msg.id);
           if (pending) {
@@ -148,6 +224,10 @@ wss.on('connection', (ws, req) => {
           break;
         }
         case 'turn': {
+          if (assistantPaused) {
+            ws.send(JSON.stringify({ type: 'turn_error', chatPath: msg.chatPath, error: 'The assistant is paused. Resume it from the Devices panel.' }));
+            break;
+          }
           if (chatLocks.has(msg.chatPath)) {
             ws.send(JSON.stringify({ type: 'turn_error', chatPath: msg.chatPath, error: 'A turn is already running in this chat.' }));
             break;
@@ -163,7 +243,20 @@ wss.on('connection', (ws, req) => {
               provider: msg.provider || 'anthropic',
               model: msg.model || 'claude-opus-4-8',
               broadcast,
-              execRemote,
+              execRemote: async (name, input) => {
+                if (assistantMode === 'readonly') {
+                  throw new Error('Commands are off in Read-only mode. The user can change the mode in Settings.');
+                }
+                if (assistantMode !== 'auto') {
+                  const approved = await requestApproval({
+                    chatPath: msg.chatPath,
+                    command: String(input?.command ?? ''),
+                    cwd: input?.cwd,
+                  });
+                  if (!approved) throw new Error('The user declined to run that command.');
+                }
+                return execRemote(name, input);
+              },
             });
           } finally {
             chatLocks.delete(msg.chatPath);

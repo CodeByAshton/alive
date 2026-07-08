@@ -1,7 +1,7 @@
 # Next steps → production
 
 Working checklist for upcoming sessions. State of the world: the prototype is feature-complete and
-covered by `npm run e2e` (25 checks, keyless via the mock engine). Everything below is what stands
+covered by `npm run e2e` (30 checks, keyless via the mock engine). Everything below is what stands
 between this and something strangers can download and trust.
 
 ## 1. Validate the real model path (first — everything else builds on it)
@@ -13,10 +13,14 @@ between this and something strangers can download and trust.
 
 ## 2. Trust boundary (all the `// TODO: trust boundary` markers)
 - [ ] Replace the shared vault key with real auth (magic link or passkey; one vault per account)
-- [ ] Device registration + attestation: server-issued device tokens, not client-declared capabilities
-- [ ] Per-command approval for `run_command` (voice-initiated, screen-confirmed: approve on any trusted surface)
+- [ ] Device registration + attestation: server-issued device tokens (capabilities are now assigned
+      server-side from device type, but the *type* is still client-declared — pairing/approval of new
+      devices is the remaining piece)
+- [x] Per-command approval for `run_command` (voice-initiated, screen-confirmed: approve on any trusted surface)
+- [x] Permission modes, Claude-style — Ask first / Auto / Read-only; default chosen in Settings,
+      stored vault-wide (`.vault/settings.json`) so every device and session agrees
 - [ ] Command allowlist / workspace confinement options in the node harness; audit log of every exec
-- [ ] Kill switch: revoke a device / pause the agent from any surface
+- [x] Kill switch: pause the agent from any surface (Devices panel); per-device revocation still open
 - [ ] Scope connector tools (per-connector allow/ask policy); never log tokens; encrypt secrets at rest
 - [ ] Rate limiting + input size caps on the WS API; authenticated CORS instead of `*`
 

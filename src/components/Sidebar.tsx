@@ -5,6 +5,7 @@
 import { useMemo, useRef, useState } from 'react';
 import {
   ChevronRight,
+  CirclePause,
   FileText,
   Folder,
   FolderOpen,
@@ -31,10 +32,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Switch } from '@/components/ui/switch';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useVault } from '../lib/store';
-import { deletePath, movePath, putRecord } from '../lib/sync';
+import { deletePath, movePath, putRecord, setAssistantPaused } from '../lib/sync';
 import { createChat, getChatConfig, listChats } from '../lib/chat';
 import type { VaultRecord } from '../lib/types';
 import { SettingsDialog } from './SettingsDialog';
@@ -248,8 +250,17 @@ function ChatsSection() {
 
 function DevicesSection() {
   const presence = useVault((s) => s.presence);
+  const paused = useVault((s) => s.paused);
   return (
     <div className="presence-panel flex flex-col gap-px">
+      {/* Kill switch: pausing stops the assistant everywhere, instantly. */}
+      <div className="pause-row mb-2 flex items-center gap-2 rounded-lg border bg-white px-2.5 py-2 shadow-xs">
+        <CirclePause className={cn('size-3.5 shrink-0', paused ? 'text-neutral-800' : 'text-neutral-400')} />
+        <span className="flex-1 text-xs font-medium text-neutral-700">
+          {paused ? 'Assistant paused' : 'Pause assistant'}
+        </span>
+        <Switch checked={paused} onCheckedChange={setAssistantPaused} aria-label="Pause assistant" />
+      </div>
       {presence.map((d) => (
         <div key={d.deviceId} className="presence-row flex h-8 items-center gap-2 rounded-lg px-2 text-[13px]">
           <span

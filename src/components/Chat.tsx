@@ -4,7 +4,7 @@
 // and a friendly status line while the assistant works.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUp, FileText, Mic, Paperclip, Plus, X } from 'lucide-react';
+import { ArrowUp, FileText, Mic, Paperclip, Plus, ShieldCheck, X } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -19,7 +19,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { useVault } from '../lib/store';
 import { chatMessages, createChat, getChatConfig, listChats } from '../lib/chat';
-import { sendTurn } from '../lib/sync';
+import { respondToApproval, sendTurn } from '../lib/sync';
 import { voice } from '../lib/voice';
 import type { StreamState } from '../lib/types';
 import { basename } from '../lib/wikilinks';
@@ -64,6 +64,30 @@ function StatusLine({ stream }: { stream: StreamState }) {
   );
 }
 
+// Voice-initiated, screen-confirmed: a command the assistant wants to run on
+// your computer waits here until a human on any device approves it.
+function ApprovalCard({ id, command }: { id: string; command: string }) {
+  return (
+    <div className="approval-card flex max-w-[86%] flex-col gap-2.5 self-start rounded-2xl border bg-white p-3.5 shadow-xs animate-in fade-in-0 slide-in-from-bottom-1">
+      <div className="flex items-center gap-2 text-[12.5px] font-medium text-neutral-800">
+        <ShieldCheck className="size-4 text-neutral-500" />
+        Run this command on your computer?
+      </div>
+      <code className="block overflow-x-auto rounded-lg border bg-neutral-50 px-3 py-2 font-mono text-[12px] whitespace-pre text-neutral-700">
+        {command}
+      </code>
+      <div className="flex gap-2">
+        <Button size="sm" className="approve flex-1" onClick={() => respondToApproval(id, true)}>
+          Approve
+        </Button>
+        <Button size="sm" variant="outline" className="deny flex-1" onClick={() => respondToApproval(id, false)}>
+          Deny
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function AttachmentCard({ path, compact }: { path: string; compact: boolean }) {
   const openFile = useVault((s) => s.openFile);
   const setRailTab = useVault((s) => s.setRailTab);
@@ -98,6 +122,8 @@ export function Chat({ compact = false }: { compact?: boolean }) {
   const activeChat = useVault((s) => s.activeChat);
   const setActiveChat = useVault((s) => s.setActiveChat);
   const stream = useVault((s) => (s.activeChat ? s.streams.get(s.activeChat) : undefined));
+  const approvals = useVault((s) => s.approvals);
+  const paused = useVault((s) => s.paused);
   const [draft, setDraft] = useState('');
   const [attachments, setAttachments] = useState<string[]>([]);
   const [listening, setListening] = useState(false);
@@ -216,6 +242,10 @@ export function Chat({ compact = false }: { compact?: boolean }) {
           </div>
         ))}
 
+        {approvals.map((a) => (
+          <ApprovalCard key={a.id} id={a.id} command={a.command} />
+        ))}
+
         {stream && (stream.active || stream.error) && (
           <div className="bubble assistant streaming flex max-w-[86%] flex-col gap-1.5 self-start">
             {stream.active && <StatusLine stream={stream} />}
@@ -262,8 +292,8 @@ export function Chat({ compact = false }: { compact?: boolean }) {
           )}
           <Textarea
             value={draft}
-            placeholder={activeChat ? 'Message…' : 'Create a chat first'}
-            disabled={!activeChat}
+            placeholder={paused ? 'Assistant is paused — resume it from Devices' : activeChat ? 'Message…' : 'Create a chat first'}
+            disabled={!activeChat || paused}
             rows={compact ? 1 : 2}
             className="min-h-0 flex-1 resize-none border-0 bg-transparent p-1.5 shadow-none focus-visible:ring-0"
             onChange={(e) => setDraft(e.target.value)}

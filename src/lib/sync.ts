@@ -8,8 +8,8 @@
 
 import { db, getLastRev, loadCachedRecords, setLastRev } from './db';
 import { useVault } from './store';
-import type { VaultRecord } from './types';
-import { getCapabilities, getDeviceId, getSurface, getVaultKey } from './device';
+import type { AssistantMode, VaultRecord } from './types';
+import { getDeviceId, getSurface, getVaultKey } from './device';
 import { getServerConfig } from './config';
 
 let ws: WebSocket | null = null;
@@ -43,11 +43,11 @@ export async function startSync(): Promise<void> {
 
 function connect() {
   if (!server) return;
+  // Capabilities are assigned server-side from the device type.
   const params = new URLSearchParams({
     key: vaultKey,
     deviceId,
     deviceType: surface,
-    caps: getCapabilities(surface).join(','),
   });
   ws = new WebSocket(`${server.wsBase}/ws?${params}`);
 
@@ -69,6 +69,20 @@ function connect() {
     switch (msg.type) {
       case 'hello':
         state.setPresence(msg.presence);
+        state.setPaused(Boolean(msg.paused));
+        if (msg.mode) state.setMode(msg.mode);
+        break;
+      case 'paused':
+        state.setPaused(Boolean(msg.paused));
+        break;
+      case 'mode':
+        state.setMode(msg.mode);
+        break;
+      case 'approval_request':
+        state.addApproval({ id: msg.id, chatPath: msg.chatPath, command: msg.command, cwd: msg.cwd ?? null });
+        break;
+      case 'approval_resolved':
+        state.removeApproval(msg.id);
         break;
       case 'presence':
         state.setPresence(msg.devices);
@@ -165,6 +179,21 @@ export async function movePath(from: string, to: string): Promise<void> {
 export function sendTurn(chatPath: string, text: string, provider: string, model: string): void {
   useVault.getState().updateStream(chatPath, () => ({ active: true, text: '', tools: [] }));
   send({ type: 'turn', chatPath, text, provider, model });
+}
+
+export function respondToApproval(id: string, approved: boolean): void {
+  useVault.getState().removeApproval(id);
+  send({ type: 'approval_response', id, approved });
+}
+
+export function setAssistantPaused(paused: boolean): void {
+  useVault.getState().setPaused(paused); // optimistic; server echoes
+  send({ type: 'set_paused', paused });
+}
+
+export function setAssistantMode(mode: AssistantMode): void {
+  useVault.getState().setMode(mode); // optimistic; server echoes
+  send({ type: 'set_mode', mode });
 }
 
 // Voice (TTS) hook — the phone surface subscribes to completed turns.

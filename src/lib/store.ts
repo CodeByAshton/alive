@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Device, Provider, StreamState, VaultRecord } from './types';
+import type { ApprovalRequest, AssistantMode, Device, Provider, StreamState, VaultRecord } from './types';
 
 interface VaultState {
   records: Map<string, VaultRecord>;
@@ -13,6 +13,9 @@ interface VaultState {
   mainView: 'chat' | 'note' | 'graph' | 'skills' | 'connectors';
   editorMode: 'read' | 'edit';
   streams: Map<string, StreamState>;
+  approvals: ApprovalRequest[];
+  paused: boolean;
+  mode: AssistantMode;
 
   applyRecords: (records: VaultRecord[]) => void;
   setPresence: (devices: Device[]) => void;
@@ -27,6 +30,10 @@ interface VaultState {
   openFile: (path: string, mode?: 'read' | 'edit') => void;
   updateStream: (chatPath: string, fn: (s: StreamState) => StreamState) => void;
   clearStream: (chatPath: string) => void;
+  addApproval: (approval: ApprovalRequest) => void;
+  removeApproval: (id: string) => void;
+  setPaused: (paused: boolean) => void;
+  setMode: (mode: AssistantMode) => void;
 }
 
 const emptyStream = (): StreamState => ({ active: false, text: '', tools: [] });
@@ -43,6 +50,9 @@ export const useVault = create<VaultState>((set) => ({
   mainView: 'chat',
   editorMode: 'read',
   streams: new Map(),
+  approvals: [],
+  paused: false,
+  mode: 'ask',
 
   applyRecords: (incoming) =>
     set((state) => {
@@ -82,4 +92,10 @@ export const useVault = create<VaultState>((set) => ({
       streams.delete(chatPath);
       return { streams };
     }),
+
+  addApproval: (approval) =>
+    set((state) => ({ approvals: [...state.approvals.filter((a) => a.id !== approval.id), approval] })),
+  removeApproval: (id) => set((state) => ({ approvals: state.approvals.filter((a) => a.id !== id) })),
+  setPaused: (paused) => set({ paused }),
+  setMode: (mode) => set({ mode }),
 }));

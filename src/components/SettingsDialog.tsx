@@ -1,6 +1,8 @@
-// Settings — the assistant's standing instructions live here (stored at
-// .vault/AGENT.md, hidden from the file tree). The assistant can read and
-// update the same file itself when you ask it to change how it behaves.
+// Settings — the assistant's default mode and its standing instructions.
+// Instructions live at .vault/AGENT.md (hidden from the file tree); the
+// assistant can read and update the same file itself when you ask it to
+// change how it behaves. The mode is a vault-wide setting shared by every
+// device, Claude-style: confirm each command, run unattended, or read-only.
 
 import { useEffect, useState } from 'react';
 import { Settings } from 'lucide-react';
@@ -15,14 +17,29 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useVault } from '../lib/store';
-import { putRecord } from '../lib/sync';
+import { putRecord, setAssistantMode } from '../lib/sync';
+import type { AssistantMode } from '../lib/types';
 
 const AGENT_PATH = '.vault/AGENT.md';
 
+const MODES: { id: AssistantMode; label: string; hint: string }[] = [
+  { id: 'ask', label: 'Ask first', hint: 'Every command waits for your approval on-screen.' },
+  { id: 'auto', label: 'Auto', hint: 'Commands run without asking. Use with care.' },
+  { id: 'readonly', label: 'Read-only', hint: 'The assistant never runs commands.' },
+];
+
 export function SettingsDialog() {
   const record = useVault((s) => s.records.get(AGENT_PATH));
+  const mode = useVault((s) => s.mode);
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState('');
 
@@ -35,6 +52,8 @@ export function SettingsDialog() {
     setOpen(false);
   };
 
+  const current = MODES.find((m) => m.id === mode) ?? MODES[0];
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
@@ -44,19 +63,45 @@ export function SettingsDialog() {
       </DialogTrigger>
       <DialogContent className="settings-dialog sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>Assistant instructions</DialogTitle>
+          <DialogTitle>Settings</DialogTitle>
           <DialogDescription>
-            Standing guidance the assistant follows in every conversation. You can also just tell the
-            assistant how you'd like it to behave — it updates this itself.
+            How the assistant behaves everywhere — every device shares these.
           </DialogDescription>
         </DialogHeader>
-        <Textarea
-          value={draft}
-          rows={14}
-          className="leading-relaxed"
-          placeholder="e.g. Keep answers short. New notes go under notes/. Always confirm before deleting anything."
-          onChange={(e) => setDraft(e.target.value)}
-        />
+
+        <div className="mode-setting flex items-center justify-between gap-4 rounded-xl border bg-neutral-50/60 px-3.5 py-3">
+          <div className="min-w-0">
+            <div className="text-[13px] font-medium text-neutral-800">Default mode</div>
+            <div className="mt-0.5 text-xs leading-relaxed text-neutral-500">{current.hint}</div>
+          </div>
+          <Select value={mode} onValueChange={(m) => setAssistantMode(m as AssistantMode)}>
+            <SelectTrigger size="sm" className="mode-select w-32 shrink-0 bg-white">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent align="end">
+              {MODES.map((m) => (
+                <SelectItem key={m.id} value={m.id}>
+                  {m.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <div className="px-0.5 text-[13px] font-medium text-neutral-800">Assistant instructions</div>
+          <Textarea
+            value={draft}
+            rows={12}
+            className="leading-relaxed"
+            placeholder="e.g. Keep answers short. New notes go under notes/. Always confirm before deleting anything."
+            onChange={(e) => setDraft(e.target.value)}
+          />
+          <p className="px-0.5 text-xs text-neutral-400">
+            You can also just tell the assistant how you'd like it to behave — it updates this itself.
+          </p>
+        </div>
+
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>
             Cancel
