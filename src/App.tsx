@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
+import { applyAppearance } from './lib/appearance';
+import { useSettings } from './lib/settings';
 import { startSync, surface } from './lib/sync';
 import { initNotifications } from './lib/notifications';
 import { useVault } from './lib/store';
@@ -15,6 +17,7 @@ import { Connect } from './components/Connect';
 import { SkillsView } from './components/SkillsView';
 import { ConnectorsView } from './components/ConnectorsView';
 import { AutomationsView } from './components/AutomationsView';
+import { PluginsView } from './components/PluginsView';
 import { CommandPalette } from './components/CommandPalette';
 
 function useSize<T extends HTMLElement>() {
@@ -38,6 +41,17 @@ function GraphView() {
       <Graph width={size.width} height={size.height} />
     </div>
   );
+}
+
+// Theme, accent, scale, and accessibility choices live in the synced settings
+// record — apply them to the document whenever they change (including when
+// another device changes them).
+function AppearanceManager() {
+  const settings = useSettings();
+  useEffect(() => {
+    applyAppearance(settings);
+  }, [settings.theme, settings.accent, settings.uiScale, settings.reduceMotion, settings.highContrast]);
+  return null;
 }
 
 // Live notifications from automations and reflection — transient toasts on
@@ -84,6 +98,7 @@ function Desktop() {
             {mainView === 'skills' && <SkillsView />}
             {mainView === 'connectors' && <ConnectorsView />}
             {mainView === 'automations' && <AutomationsView />}
+            {mainView === 'plugins' && <PluginsView />}
           </div>
         </section>
       </main>
@@ -129,6 +144,7 @@ export default function App() {
     return <div className="boot grid h-full place-items-center text-sm text-neutral-400">Opening vault…</div>;
   return (
     <>
+      <AppearanceManager />
       {surface === 'phone' ? <Phone /> : <Desktop />}
       <Notices />
     </>

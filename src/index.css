@@ -32,6 +32,10 @@
 
   /* app canvas — the soft gray everything floats on */
   --canvas: oklch(0.972 0 0);
+
+  /* brand accent — wikilinks, highlights; themable from Appearance settings
+     (distinct from shadcn's --accent surface token) */
+  --accent-color: oklch(0.51 0.14 262);
 }
 
 @theme inline {
@@ -105,7 +109,25 @@
 .markdown code { @apply font-mono text-[0.875em]; }
 .markdown :not(pre) > code { @apply rounded-md border bg-neutral-100 px-1.5 py-px text-neutral-800; }
 .markdown a { @apply text-neutral-900 underline decoration-neutral-300 underline-offset-2 hover:decoration-neutral-500; }
-.markdown a.wikilink { @apply rounded-sm bg-neutral-100 px-1 py-px no-underline font-medium text-neutral-900 hover:bg-neutral-200 transition-colors; }
+/* Wikilinks read as in-app destinations, not web links: accent-tinted pills
+   with no underline. Unresolved links ("create on click") render hollow with
+   a dashed edge. */
+.markdown a.wikilink {
+  @apply rounded-md px-1 py-px font-medium no-underline transition-colors;
+  color: var(--accent-color);
+  background: color-mix(in oklab, var(--accent-color) 9%, transparent);
+}
+.markdown a.wikilink:hover {
+  background: color-mix(in oklab, var(--accent-color) 16%, transparent);
+}
+.markdown a.wikilink-new {
+  background: transparent;
+  color: color-mix(in oklab, var(--accent-color) 72%, var(--color-neutral-500));
+  border: 1px dashed color-mix(in oklab, var(--accent-color) 42%, transparent);
+}
+.markdown a.wikilink-new:hover {
+  background: color-mix(in oklab, var(--accent-color) 8%, transparent);
+}
 .markdown hr { @apply my-6 border-neutral-200; }
 .markdown table { @apply my-3 w-full border-collapse text-[13.5px]; }
 .markdown th { @apply border-b-2 border-neutral-200 px-3 py-1.5 text-left font-semibold; }
@@ -124,16 +146,16 @@
 .editor-cm .cm-editor.cm-focused { outline: none; }
 .editor-cm .cm-content {
   @apply mx-auto max-w-[72ch] py-6 px-8 font-mono text-[13.5px] leading-[1.7] text-neutral-800;
-  caret-color: oklch(0.205 0 0);
+  caret-color: var(--foreground);
   padding-bottom: 40vh;
 }
 .editor-cm .cm-line { padding: 0; }
 .editor-cm .cm-gutters { display: none; }
-.editor-cm .cm-selectionBackground { background: oklch(0.9 0 0) !important; }
+.editor-cm .cm-selectionBackground { background: var(--color-neutral-300) !important; }
 
 /* shimmer status text — Claude-style working indicator */
 .shimmer-text {
-  background: linear-gradient(90deg, #a3a3a3 25%, #171717 50%, #a3a3a3 75%);
+  background: linear-gradient(90deg, var(--color-neutral-400) 25%, var(--color-neutral-950) 50%, var(--color-neutral-400) 75%);
   background-size: 200% 100%;
   -webkit-background-clip: text;
   background-clip: text;
@@ -205,7 +227,8 @@ button { -webkit-tap-highlight-color: transparent; }
   50% { transform: scaleY(1); }
 }
 
-/* Respect users who turn animations off. */
+/* Respect users who turn animations off — via the OS preference or the
+   in-app Accessibility setting (.reduce-motion is set on <html>). */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
@@ -213,11 +236,16 @@ button { -webkit-tap-highlight-color: transparent; }
     transition-duration: 0.01ms !important;
   }
 }
+.reduce-motion *, .reduce-motion *::before, .reduce-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
 
 /* thin quiet scrollbars for plain overflow areas */
 .quiet-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
 .quiet-scroll::-webkit-scrollbar-thumb {
-  background: oklch(0.87 0 0);
+  background: var(--color-neutral-300);
   border-radius: 4px;
   border: 2px solid transparent;
   background-clip: content-box;

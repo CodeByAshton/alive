@@ -4,17 +4,23 @@
 
 import { useMemo, useRef, useState, type ElementType } from 'react';
 import {
+  CalendarDays,
   ChevronRight,
   CirclePause,
+  Copy,
   FileText,
   Folder,
+  FolderInput,
   FolderOpen,
   FolderPlus,
+  LayoutTemplate,
+  Link,
   MessageSquare,
   MonitorSmartphone,
   MoreHorizontal,
   PencilLine,
   Plus,
+  Puzzle,
   SquarePen,
   Bot,
   Cable,
@@ -31,6 +37,9 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import {
@@ -38,6 +47,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Switch } from '@/components/ui/switch';
@@ -46,6 +58,7 @@ import { cn } from '@/lib/utils';
 import { useVault } from '../lib/store';
 import { deletePath, movePath, putRecord, setAssistantPaused } from '../lib/sync';
 import { createChat, getChatConfig, listChats, renameChat } from '../lib/chat';
+import { createFromTemplate, enabledPlugins, listTemplates, openDailyNote, usePlugin } from '../lib/plugins';
 import type { VaultRecord } from '../lib/types';
 import { SettingsDialog } from './SettingsDialog';
 import { ConfirmDialog, NameDialog, type ConfirmPrompt, type NamePrompt } from './dialogs';
@@ -94,13 +107,52 @@ function buildTree(records: Map<string, VaultRecord>): TreeNode[] {
 // payloads aren't readable during dragover, only on drop.
 let dragPath: string | null = null;
 
+// "Foo.md" -> "Foo copy.md" -> "Foo copy 2.md" (first free slot).
+function uniqueCopyPath(records: Map<string, VaultRecord>, path: string): string {
+  const ext = path.endsWith('.md') ? '.md' : '';
+  const stem = ext ? path.slice(0, -ext.length) : path;
+  for (let n = 1; ; n++) {
+    const candidate = `${stem} copy${n === 1 ? '' : ` ${n}`}${ext}`;
+    if (!records.has(candidate)) return candidate;
+  }
+}
+
+// The component kit for a menu flavor — the same items render inside both the
+// hover "…" dropdown and the right-click context menu.
+interface MenuKit {
+  Item: ElementType;
+  Sep: ElementType;
+  Sub: ElementType;
+  SubTrigger: ElementType;
+  SubContent: ElementType;
+}
+
+const DROPDOWN_KIT: MenuKit = {
+  Item: DropdownMenuItem,
+  Sep: DropdownMenuSeparator,
+  Sub: DropdownMenuSub,
+  SubTrigger: DropdownMenuSubTrigger,
+  SubContent: DropdownMenuSubContent,
+};
+
+const CONTEXT_KIT: MenuKit = {
+  Item: ContextMenuItem,
+  Sep: ContextMenuSeparator,
+  Sub: ContextMenuSub,
+  SubTrigger: ContextMenuSubTrigger,
+  SubContent: ContextMenuSubContent,
+};
+
 function Node({ node, depth, dialogs }: { node: TreeNode; depth: number; dialogs: DialogApi }) {
   const activePath = useVault((s) => s.activePath);
   const openFile = useVault((s) => s.openFile);
+  const records = useVault((s) => s.records);
   const [open, setOpen] = useState(depth < 1);
   const [dropTarget, setDropTarget] = useState(false);
 
   const active = activePath === node.path;
+  const displayName = node.name.replace(/\.md$/, '');
+  const parentDir = node.path.split('/').slice(0, -1).join('/');
 
   const onClick = () => {
     if (node.type === 'folder') setOpen(!open);
@@ -123,38 +175,140 @@ function Node({ node, depth, dialogs }: { node: TreeNode; depth: number; dialogs
       },
     });
 
-  const askRename = () =>
+  const askNewFolderInside = () =>
     dialogs.ask({
-      title: 'Rename / move',
-      description: 'Edit the full path to rename or move.',
-      initial: node.path,
-      action: 'Save',
-      onSubmit: async (to) => {
-        if (to === node.path) return;
-        await movePath(node.path, to.replace(/\.md$/, '') + (node.type === 'file' ? '.md' : ''));
+      title: 'New folder',
+      placeholder: 'Folder name',
+      onSubmit: async (name) => {
+        await putRecord(`${node.path}/${name}`, 'folder');
+        setOpen(true);
       },
     });
 
+  const askRename = () =>
+    dialogs.ask({
+      title: `Rename ${node.type === 'folder' ? 'folder' : 'note'}`,
+      initial: displayName,
+      action: 'Rename',
+      onSubmit: async (name) => {
+        const next = name.replace(/\.md$/, '') + (node.type === 'file' ? '.md' : '');
+        if (next === node.name) return;
+        await movePath(node.path, parentDir ? `${parentDir}/${next}` : next);
+      },
+    });
+
+  const moveTo = (dest: string) => movePath(node.path, dest ? `${dest}/${node.name}` : node.name);
+
+  const duplicate = async () => {
+    const dest = uniqueCopyPath(records, node.path);
+    if (node.type === 'file') {
+      await putRecord(dest, 'file', records.get(node.path)?.content ?? '');
+      return;
+    }
+    await putRecord(dest, 'folder');
+    for (const rec of records.values()) {
+      if (!rec.path.startsWith(node.path + '/')) continue;
+      await putRecord(dest + rec.path.slice(node.path.length), rec.type, rec.content);
+    }
+  };
+
+  const copyLink = () => navigator.clipboard?.writeText(`[[${displayName}]]`);
+
   const confirmDelete = () =>
     dialogs.confirm({
-      title: `Delete ${node.name.replace(/\.md$/, '')}?`,
+      title: `Delete ${displayName}?`,
       description: node.type === 'folder' ? 'Everything inside this folder will be deleted.' : undefined,
       onConfirm: () => deletePath(node.path),
     });
 
-  const menuItems = (Item: ElementType, Sep: ElementType) => (
+  // Folders this node could move into — everything except itself, its own
+  // subtree, and where it already lives.
+  const moveTargets = [...records.values()]
+    .filter(
+      (r) =>
+        r.type === 'folder' &&
+        !r.path.startsWith('.') &&
+        r.path !== 'chats' &&
+        !r.path.startsWith('chats/') &&
+        r.path !== node.path &&
+        !r.path.startsWith(node.path + '/') &&
+        r.path !== parentDir
+    )
+    .map((r) => r.path)
+    .sort();
+
+  const templatesOn = enabledPlugins(records).has('templates');
+  const templates = templatesOn ? listTemplates(records) : [];
+
+  const askNewFromTemplate = (templatePath: string) =>
+    dialogs.ask({
+      title: 'New note from template',
+      placeholder: 'Note name',
+      onSubmit: async (name) => {
+        const path = await createFromTemplate(records, templatePath, node.path, name);
+        openFile(path, 'edit');
+        setOpen(true);
+      },
+    });
+
+  const menuItems = ({ Item, Sep, Sub, SubTrigger, SubContent }: MenuKit) => (
     <>
       {node.type === 'folder' && (
         <>
           <Item onClick={askNewNoteInside}>
             <Plus /> New note inside
           </Item>
+          <Item onClick={askNewFolderInside}>
+            <FolderPlus /> New folder inside
+          </Item>
+          {templatesOn && (
+            <Sub>
+              <SubTrigger>
+                <LayoutTemplate className="mr-2 size-4 text-muted-foreground" /> New from template
+              </SubTrigger>
+              <SubContent className="max-h-64 w-52 overflow-y-auto">
+                {templates.map((t) => (
+                  <Item key={t.path} onClick={() => askNewFromTemplate(t.path)}>
+                    <FileText /> <span className="min-w-0 flex-1 truncate">{t.name}</span>
+                  </Item>
+                ))}
+                {!templates.length && <Item disabled>Add notes under templates/</Item>}
+              </SubContent>
+            </Sub>
+          )}
           <Sep />
         </>
       )}
       <Item onClick={askRename}>
-        <PencilLine /> Rename / move
+        <PencilLine /> Rename
       </Item>
+      <Sub>
+        <SubTrigger>
+          <FolderInput className="mr-2 size-4 text-muted-foreground" /> Move to
+        </SubTrigger>
+        <SubContent className="max-h-64 w-48 overflow-y-auto">
+          {parentDir && (
+            <Item onClick={() => moveTo('')}>
+              <Folder /> Vault root
+            </Item>
+          )}
+          {moveTargets.map((path) => (
+            <Item key={path} onClick={() => moveTo(path)}>
+              <Folder /> <span className="min-w-0 flex-1 truncate">{path}</span>
+            </Item>
+          ))}
+          {!moveTargets.length && !parentDir && <Item disabled>No other folders</Item>}
+        </SubContent>
+      </Sub>
+      <Item onClick={duplicate}>
+        <Copy /> Duplicate
+      </Item>
+      {node.type === 'file' && (
+        <Item onClick={copyLink}>
+          <Link /> Copy link
+        </Item>
+      )}
+      <Sep />
       <Item variant="destructive" onClick={confirmDelete}>
         <Trash2 /> Delete
       </Item>
@@ -233,14 +387,14 @@ function Node({ node, depth, dialogs }: { node: TreeNode; depth: number; dialogs
                     <MoreHorizontal className="size-3.5" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-44">
-                  {menuItems(DropdownMenuItem, DropdownMenuSeparator)}
+                <DropdownMenuContent align="start" className="w-48">
+                  {menuItems(DROPDOWN_KIT)}
                 </DropdownMenuContent>
               </DropdownMenu>
             </span>
           </div>
         </ContextMenuTrigger>
-        <ContextMenuContent className="w-44">{menuItems(ContextMenuItem, ContextMenuSeparator)}</ContextMenuContent>
+        <ContextMenuContent className="w-48">{menuItems(CONTEXT_KIT)}</ContextMenuContent>
       </ContextMenu>
       {node.type === 'folder' && open && (
         <div>
@@ -423,7 +577,9 @@ function CustomizeItem({ className }: { className: (active: boolean) => string }
       <DropdownMenuTrigger asChild>
         <button
           title="Customize"
-          className={className(mainView === 'skills' || mainView === 'connectors' || mainView === 'automations')}
+          className={className(
+            mainView === 'skills' || mainView === 'connectors' || mainView === 'automations' || mainView === 'plugins'
+          )}
           onMouseEnter={openNow}
           onMouseLeave={closeSoon}
         >
@@ -445,6 +601,9 @@ function CustomizeItem({ className }: { className: (active: boolean) => string }
       >
         <DropdownMenuItem onClick={() => setMainView('skills')}>
           <Zap /> Skills
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setMainView('plugins')}>
+          <Puzzle /> Plugins
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => setMainView('automations')}>
           <Bot /> Automations
@@ -472,6 +631,7 @@ export function Sidebar() {
   const [namePrompt, setNamePrompt] = useState<NamePrompt | null>(null);
   const [confirmPrompt, setConfirmPrompt] = useState<ConfirmPrompt | null>(null);
   const dialogs: DialogApi = { ask: setNamePrompt, confirm: setConfirmPrompt };
+  const dailyNotesOn = usePlugin('daily-notes');
 
   const activeDevices = presence.filter((d) => d.state === 'active').length;
 
@@ -537,6 +697,22 @@ export function Sidebar() {
           </TooltipTrigger>
           <TooltipContent>New folder</TooltipContent>
         </Tooltip>
+        {dailyNotesOn && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="daily-note"
+                title="Today's note"
+                onClick={() => openDailyNote(records)}
+              >
+                <CalendarDays className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Today's note</TooltipContent>
+          </Tooltip>
+        )}
         <SettingsDialog />
       </div>
 

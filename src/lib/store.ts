@@ -9,8 +9,9 @@ interface VaultState {
   providers: Provider[];
   activePath: string | null; // file open in the editor
   activeChat: string | null; // chat folder open in the chat pane
+  openTabs: string[]; // editor tab strip, in open order
   railTab: 'files' | 'chats' | 'devices';
-  mainView: 'chat' | 'note' | 'graph' | 'skills' | 'connectors' | 'automations';
+  mainView: 'chat' | 'note' | 'graph' | 'skills' | 'connectors' | 'automations' | 'plugins';
   editorMode: 'read' | 'edit';
   streams: Map<string, StreamState>;
   approvals: ApprovalRequest[];
@@ -27,9 +28,10 @@ interface VaultState {
   setActivePath: (path: string | null) => void;
   setActiveChat: (path: string | null) => void;
   setRailTab: (tab: 'files' | 'chats' | 'devices') => void;
-  setMainView: (view: 'chat' | 'note' | 'graph' | 'skills' | 'connectors' | 'automations') => void;
+  setMainView: (view: 'chat' | 'note' | 'graph' | 'skills' | 'connectors' | 'automations' | 'plugins') => void;
   setEditorMode: (mode: 'read' | 'edit') => void;
   openFile: (path: string, mode?: 'read' | 'edit') => void;
+  closeTab: (path: string) => void;
   updateStream: (chatPath: string, fn: (s: StreamState) => StreamState) => void;
   clearStream: (chatPath: string) => void;
   addApproval: (approval: ApprovalRequest) => void;
@@ -51,6 +53,7 @@ export const useVault = create<VaultState>((set) => ({
   providers: [],
   activePath: null,
   activeChat: null,
+  openTabs: [],
   railTab: 'files',
   mainView: 'chat',
   editorMode: 'read',
@@ -84,7 +87,24 @@ export const useVault = create<VaultState>((set) => ({
   setRailTab: (railTab) => set({ railTab }),
   setMainView: (mainView) => set({ mainView }),
   setEditorMode: (editorMode) => set({ editorMode }),
-  openFile: (path, mode = 'read') => set({ activePath: path, editorMode: mode, mainView: 'note' }),
+  openFile: (path, mode = 'read') =>
+    set((state) => ({
+      activePath: path,
+      editorMode: mode,
+      mainView: 'note',
+      openTabs: state.openTabs.includes(path) ? state.openTabs : [...state.openTabs, path],
+    })),
+
+  // Closing the active tab activates its left neighbor; closing the last tab
+  // returns to the chat.
+  closeTab: (path) =>
+    set((state) => {
+      const openTabs = state.openTabs.filter((p) => p !== path);
+      if (state.activePath !== path) return { openTabs };
+      if (!openTabs.length) return { openTabs, activePath: null, mainView: 'chat' as const };
+      const idx = Math.max(0, state.openTabs.indexOf(path) - 1);
+      return { openTabs, activePath: openTabs[Math.min(idx, openTabs.length - 1)] };
+    }),
 
   updateStream: (chatPath, fn) =>
     set((state) => {
