@@ -29,7 +29,11 @@ export function ModelPicker({ chatPath }: { chatPath: string }) {
         await setChatConfig(records, chatPath, { provider, model });
       }}
     >
-      <SelectTrigger size="sm" className="model-picker max-w-44 font-mono text-[11px] text-neutral-500" title="Model">
+      <SelectTrigger
+        size="sm"
+        className="model-picker max-w-44 border-transparent font-mono text-[11px] text-neutral-500 shadow-none hover:bg-accent"
+        title="Model"
+      >
         <SelectValue placeholder="Model" />
       </SelectTrigger>
       <SelectContent align="end">

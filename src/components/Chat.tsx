@@ -4,15 +4,25 @@
 // and a friendly status line while the assistant works.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUp, FileText, Plus } from 'lucide-react';
+import { ArrowUp, FileText, Mic, Paperclip, Plus, X } from 'lucide-react';
 
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { useVault } from '../lib/store';
 import { chatMessages, createChat, getChatConfig, listChats } from '../lib/chat';
 import { sendTurn } from '../lib/sync';
+import { voice } from '../lib/voice';
 import type { StreamState } from '../lib/types';
+import { basename } from '../lib/wikilinks';
 import { Markdown } from './Markdown';
 import { ModelPicker } from './ModelPicker';
 
@@ -89,10 +99,23 @@ export function Chat({ compact = false }: { compact?: boolean }) {
   const setActiveChat = useVault((s) => s.setActiveChat);
   const stream = useVault((s) => (s.activeChat ? s.streams.get(s.activeChat) : undefined));
   const [draft, setDraft] = useState('');
+  const [attachments, setAttachments] = useState<string[]>([]);
+  const [listening, setListening] = useState(false);
+  const stopListenRef = useRef<(() => void) | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const chats = useMemo(() => listChats(records), [records]);
   const messages = useMemo(() => (activeChat ? chatMessages(records, activeChat) : []), [records, activeChat]);
+
+  // Notes offered by the attach button — most recently edited first.
+  const attachable = useMemo(
+    () =>
+      [...records.values()]
+        .filter((r) => r.type === 'file' && r.path.endsWith('.md') && !r.path.startsWith('chats/'))
+        .sort((a, b) => b.mtime - a.mtime)
+        .slice(0, 15),
+    [records]
+  );
 
   useEffect(() => {
     if (!activeChat && chats.length) setActiveChat(chats[0].path);
@@ -103,11 +126,34 @@ export function Chat({ compact = false }: { compact?: boolean }) {
   }, [messages.length, stream?.text, stream?.tools.length]);
 
   const submit = () => {
-    const text = draft.trim();
-    if (!text || !activeChat || stream?.active) return;
+    let text = draft.trim();
+    if ((!text && !attachments.length) || !activeChat || stream?.active) return;
+    if (attachments.length) {
+      // Attached notes ride along as [[references]] — the harness inlines
+      // their contents into the turn's context.
+      const refs = attachments.map((p) => `[[${basename(p)}]]`).join(' ');
+      text = text ? `${text}\n\n${refs}` : refs;
+    }
     const config = getChatConfig(records, activeChat);
     sendTurn(activeChat, text, config.provider, config.model);
     setDraft('');
+    setAttachments([]);
+  };
+
+  const toggleMic = () => {
+    if (listening) {
+      stopListenRef.current?.();
+      return;
+    }
+    setListening(true);
+    const base = draft;
+    stopListenRef.current = voice.listen(
+      (text, isFinal) => {
+        setDraft(base ? `${base} ${text}` : text);
+        if (isFinal) setListening(false);
+      },
+      () => setListening(false)
+    );
   };
 
   const newChat = async () => {
@@ -136,13 +182,13 @@ export function Chat({ compact = false }: { compact?: boolean }) {
             {chats.find((c) => c.path === activeChat)?.title ?? 'No chat selected'}
           </span>
         )}
-        {activeChat && <ModelPicker chatPath={activeChat} />}
         <Button variant="ghost" size="icon-sm" title="New chat" onClick={newChat}>
           <Plus className="size-4" />
         </Button>
       </header>
 
-      <div className="chat-scroll quiet-scroll flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-4" ref={scrollRef}>
+      <div className="chat-scroll quiet-scroll flex flex-1 overflow-y-auto px-4 py-4" ref={scrollRef}>
+        <div className={cn('mx-auto flex min-h-full w-full flex-col gap-3', !compact && 'max-w-3xl')}>
         {messages.map((m) => (
           <div
             key={m.path}
@@ -193,15 +239,32 @@ export function Chat({ compact = false }: { compact?: boolean }) {
             </p>
           </div>
         )}
+        </div>
       </div>
 
-      <div className="composer shrink-0 px-3 pb-3">
-        <div className="flex items-end gap-2 rounded-2xl border bg-white p-2 shadow-xs transition-colors focus-within:border-neutral-400">
+      <div className={cn('composer mx-auto w-full shrink-0 px-3 pb-3', !compact && 'max-w-3xl')}>
+        <div className="flex flex-col gap-1 rounded-2xl border bg-white p-2 shadow-xs transition-colors focus-within:border-neutral-400">
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-1 px-1 pt-0.5">
+              {attachments.map((path) => (
+                <Badge key={path} variant="secondary" className="gap-1.5 rounded-lg py-1 font-normal text-neutral-600">
+                  <FileText className="size-3" />
+                  {basename(path)}
+                  <button
+                    className="cursor-pointer text-neutral-400 hover:text-neutral-700"
+                    onClick={() => setAttachments(attachments.filter((p) => p !== path))}
+                  >
+                    <X className="size-3" />
+                  </button>
+                </Badge>
+              ))}
+            </div>
+          )}
           <Textarea
             value={draft}
             placeholder={activeChat ? 'Message…' : 'Create a chat first'}
             disabled={!activeChat}
-            rows={2}
+            rows={compact ? 1 : 2}
             className="min-h-0 flex-1 resize-none border-0 bg-transparent p-1.5 shadow-none focus-visible:ring-0"
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
@@ -211,15 +274,52 @@ export function Chat({ compact = false }: { compact?: boolean }) {
               }
             }}
           />
-          <Button
-            className="send size-8 rounded-full"
-            size="icon"
-            title="Send"
-            onClick={submit}
-            disabled={!draft.trim() || !activeChat || stream?.active}
-          >
-            <ArrowUp className="size-4" />
-          </Button>
+          <div className="flex items-center gap-1">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon-sm" title="Attach a note" disabled={!activeChat}>
+                  <Paperclip className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="attach-menu max-h-72 w-60 overflow-y-auto">
+                <DropdownMenuLabel>Attach a note</DropdownMenuLabel>
+                {attachable.map((r) => (
+                  <DropdownMenuItem
+                    key={r.path}
+                    disabled={attachments.includes(r.path)}
+                    onClick={() => setAttachments([...attachments, r.path])}
+                  >
+                    <FileText />
+                    <span className="min-w-0 flex-1 truncate">{basename(r.path)}</span>
+                  </DropdownMenuItem>
+                ))}
+                {!attachable.length && <DropdownMenuItem disabled>No notes yet</DropdownMenuItem>}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            {activeChat && <ModelPicker chatPath={activeChat} />}
+            <span className="flex-1" />
+            {voice.available && (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                title={listening ? 'Stop dictating' : 'Dictate'}
+                className={cn('mic-button', listening && 'animate-pulse text-destructive')}
+                disabled={!activeChat}
+                onClick={toggleMic}
+              >
+                <Mic className="size-4" />
+              </Button>
+            )}
+            <Button
+              className="send size-8 rounded-full"
+              size="icon"
+              title="Send"
+              onClick={submit}
+              disabled={(!draft.trim() && !attachments.length) || !activeChat || stream?.active}
+            >
+              <ArrowUp className="size-4" />
+            </Button>
+          </div>
         </div>
       </div>
     </div>

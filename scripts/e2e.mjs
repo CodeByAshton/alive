@@ -31,9 +31,10 @@ await desktop.waitForSelector('.tree-row', { timeout: 10000 });
 const treeText = await desktop.locator('.tree').innerText();
 check('desktop sees seeded vault tree', treeText.includes('Welcome') && treeText.includes('skills'));
 
-// 2. Graph renders nodes
+// 2. Graph is a full-screen view reachable from the sidebar menu
+await desktop.locator('.nav-item[title="Graph"]').click();
 await desktop.waitForTimeout(1500);
-const graphCanvas = await desktop.locator('.right-rail canvas').count();
+const graphCanvas = await desktop.locator('.graph-view canvas').count();
 check('graph view renders', graphCanvas > 0);
 
 // 3. Create a note with a wikilink from the desktop (Files panel action)

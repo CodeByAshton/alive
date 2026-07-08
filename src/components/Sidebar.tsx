@@ -16,6 +16,7 @@ import {
   Plus,
   SquarePen,
   Trash2,
+  Waypoints,
   Zap,
 } from 'lucide-react';
 
@@ -328,12 +329,15 @@ const MENU = [
   { id: 'files', icon: Folder, label: 'Files' },
   { id: 'chats', icon: MessageSquare, label: 'Chats' },
   { id: 'skills', icon: Zap, label: 'Skills' },
+  { id: 'graph', icon: Waypoints, label: 'Graph' },
   { id: 'devices', icon: MonitorSmartphone, label: 'Devices' },
 ] as const;
 
 export function Sidebar() {
   const railTab = useVault((s) => s.railTab);
   const setRailTab = useVault((s) => s.setRailTab);
+  const mainView = useVault((s) => s.mainView);
+  const setMainView = useVault((s) => s.setMainView);
   const connected = useVault((s) => s.connected);
   const presence = useVault((s) => s.presence);
   const openFile = useVault((s) => s.openFile);
@@ -423,9 +427,16 @@ export function Sidebar() {
             className={cn(
               'nav-item group flex h-8 cursor-pointer items-center gap-2.5 rounded-lg px-2 text-[13px] font-medium text-neutral-600 transition-colors select-none',
               'hover:bg-neutral-200/55 hover:text-neutral-900',
-              railTab === item.id && 'bg-white text-neutral-900 shadow-xs'
+              (item.id === 'graph' ? mainView === 'graph' : railTab === item.id) && 'bg-white text-neutral-900 shadow-xs'
             )}
-            onClick={() => setRailTab(item.id)}
+            onClick={() => {
+              if (item.id === 'graph') {
+                setMainView('graph');
+                return;
+              }
+              setRailTab(item.id);
+              if (item.id === 'chats') setMainView('chat');
+            }}
           >
             <item.icon className="size-4 text-neutral-400" />
             <span className="flex-1 text-left">{item.label}</span>

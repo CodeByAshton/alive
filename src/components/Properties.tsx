@@ -43,7 +43,7 @@ let rowId = 0;
 export function Properties({ record }: { record: VaultRecord }) {
   const [rows, setRows] = useState<Row[]>([]);
   const lastSaved = useRef<string | null>(null);
-  const saveTimer = useRef<ReturnType<typeof setTimeout>>();
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const newKeyRef = useRef<HTMLInputElement | null>(null);
   const [focusNew, setFocusNew] = useState(false);
 

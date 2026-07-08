@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Waypoints, X } from 'lucide-react';
 
-import { Button } from '@/components/ui/button';
 import { startSync, surface } from './lib/sync';
 import { useVault } from './lib/store';
 import { getServerConfig } from './lib/config';
@@ -26,44 +24,29 @@ function useSize<T extends HTMLElement>() {
   return { ref, size };
 }
 
+function GraphView() {
+  const { ref, size } = useSize<HTMLDivElement>();
+  return (
+    <div className="graph-view min-h-0 flex-1" ref={ref}>
+      <Graph width={size.width} height={size.height} />
+    </div>
+  );
+}
+
+// One full-screen view at a time beside the sidebar: the chat, an open note,
+// or the graph.
 function Desktop() {
-  const [showGraph, setShowGraph] = useState(true);
-  const { ref: graphRef, size } = useSize<HTMLDivElement>();
+  const mainView = useVault((s) => s.mainView);
 
   return (
     <div className="desktop flex h-full">
       <Sidebar />
-      <main className="flex min-w-0 flex-1 gap-2 p-2 pl-0">
-        <section className="editor-pane flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border bg-background shadow-xs">
-          <Editor />
+      <main className="flex min-w-0 flex-1 p-2 pl-0">
+        <section className="main-card flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border bg-background shadow-xs">
+          {mainView === 'chat' && <Chat />}
+          {mainView === 'note' && <Editor />}
+          {mainView === 'graph' && <GraphView />}
         </section>
-        <section className="chat-pane flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border bg-background shadow-xs">
-          <Chat />
-        </section>
-        {showGraph && (
-          <section className="right-rail flex w-80 shrink-0 flex-col overflow-hidden rounded-2xl border bg-background shadow-xs">
-            <header className="flex h-12 shrink-0 items-center justify-between border-b px-4">
-              <span className="text-[11px] font-semibold tracking-wide text-neutral-400 uppercase">Graph</span>
-              <Button variant="ghost" size="icon-sm" title="Hide graph" onClick={() => setShowGraph(false)}>
-                <X className="size-3.5" />
-              </Button>
-            </header>
-            <div className="min-h-0 flex-1" ref={graphRef}>
-              <Graph width={size.width} height={size.height} />
-            </div>
-          </section>
-        )}
-        {!showGraph && (
-          <Button
-            variant="outline"
-            size="icon-sm"
-            className="rail-reveal absolute top-4 right-4 z-10 bg-background"
-            title="Show graph"
-            onClick={() => setShowGraph(true)}
-          >
-            <Waypoints className="size-4" />
-          </Button>
-        )}
       </main>
     </div>
   );

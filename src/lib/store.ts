@@ -10,6 +10,7 @@ interface VaultState {
   activePath: string | null; // file open in the editor
   activeChat: string | null; // chat folder open in the chat pane
   railTab: 'files' | 'chats' | 'skills' | 'devices';
+  mainView: 'chat' | 'note' | 'graph';
   editorMode: 'read' | 'edit';
   streams: Map<string, StreamState>;
 
@@ -21,6 +22,7 @@ interface VaultState {
   setActivePath: (path: string | null) => void;
   setActiveChat: (path: string | null) => void;
   setRailTab: (tab: 'files' | 'chats' | 'skills' | 'devices') => void;
+  setMainView: (view: 'chat' | 'note' | 'graph') => void;
   setEditorMode: (mode: 'read' | 'edit') => void;
   openFile: (path: string, mode?: 'read' | 'edit') => void;
   updateStream: (chatPath: string, fn: (s: StreamState) => StreamState) => void;
@@ -38,6 +40,7 @@ export const useVault = create<VaultState>((set) => ({
   activePath: null,
   activeChat: null,
   railTab: 'files',
+  mainView: 'chat',
   editorMode: 'read',
   streams: new Map(),
 
@@ -60,10 +63,11 @@ export const useVault = create<VaultState>((set) => ({
   setHydrated: () => set({ hydrated: true }),
   setProviders: (providers) => set({ providers }),
   setActivePath: (activePath) => set({ activePath }),
-  setActiveChat: (activeChat) => set({ activeChat }),
+  setActiveChat: (activeChat) => set({ activeChat, ...(activeChat ? { mainView: 'chat' as const } : {}) }),
   setRailTab: (railTab) => set({ railTab }),
+  setMainView: (mainView) => set({ mainView }),
   setEditorMode: (editorMode) => set({ editorMode }),
-  openFile: (path, mode = 'read') => set({ activePath: path, editorMode: mode }),
+  openFile: (path, mode = 'read') => set({ activePath: path, editorMode: mode, mainView: 'note' }),
 
   updateStream: (chatPath, fn) =>
     set((state) => {

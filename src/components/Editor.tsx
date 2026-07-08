@@ -8,8 +8,9 @@ import { EditorState } from '@codemirror/state';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
-import { ChevronRight, FileText } from 'lucide-react';
+import { ChevronRight, FileText, X } from 'lucide-react';
 
+import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { parseFrontmatter } from '../../shared/frontmatter.mjs';
 import { useVault } from '../lib/store';
@@ -22,9 +23,10 @@ export function Editor() {
   const record = useVault((s) => (s.activePath ? s.records.get(s.activePath) : undefined));
   const mode = useVault((s) => s.editorMode);
   const setMode = useVault((s) => s.setEditorMode);
+  const setMainView = useVault((s) => s.setMainView);
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
-  const saveTimer = useRef<ReturnType<typeof setTimeout>>();
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const lastLocalEdit = useRef<{ path: string; content: string } | null>(null);
 
   useEffect(() => {
@@ -104,6 +106,15 @@ export function Editor() {
             <TabsTrigger value="edit">Edit</TabsTrigger>
           </TabsList>
         </Tabs>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="editor-close ml-1"
+          title="Close note"
+          onClick={() => setMainView('chat')}
+        >
+          <X className="size-4" />
+        </Button>
       </header>
 
       {mode === 'edit' ? (
