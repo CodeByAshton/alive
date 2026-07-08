@@ -46,6 +46,7 @@ export function chatMessages(records: Map<string, VaultRecord>, chatPath: string
       model: data.model,
       provider: data.provider,
       toolsUsed: Array.isArray(data.tools_used) ? data.tools_used : undefined,
+      filesTouched: Array.isArray(data.files_touched) ? data.files_touched.map(String) : undefined,
     });
   }
   return messages.sort((a, b) => (a.path < b.path ? -1 : 1));

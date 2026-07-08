@@ -44,4 +44,5 @@ export interface ChatMessage {
   model?: string;
   provider?: string;
   toolsUsed?: string[];
+  filesTouched?: string[];
 }

@@ -47,6 +47,19 @@ await desktop.keyboard.type('\nThis links to [[Ideas]].');
 await desktop.waitForTimeout(900); // debounce save
 check('note created on desktop', (await desktop.locator('.tree').innerText()).includes('Sync Test'));
 
+// 3b. Notion-style properties editor writes YAML frontmatter
+await desktop.locator('.editor-modes [role="tab"]', { hasText: 'Read' }).click();
+await desktop.locator('.add-property').click();
+await desktop.locator('[data-testid="properties"] input[placeholder="name"]').last().fill('status');
+await desktop.locator('[data-testid="properties"] input[placeholder="Empty"]').last().fill('draft');
+await desktop.waitForTimeout(1000); // debounce save
+const propContent = await desktop.evaluate(async () => {
+  const { db } = await import('/src/lib/db.ts');
+  const rec = await db.records.get('notes/Sync Test.md');
+  return rec?.content ?? '';
+});
+check('properties editor writes YAML frontmatter', propContent.startsWith('---') && propContent.includes('status: draft'), propContent.split('\n').slice(0, 4).join(' | '));
+
 // 4. Rail panels: skills panel lists seeded skills
 await desktop.locator('.nav-item[title="Skills"]').click();
 const skillsText = await desktop.locator('.panel-list').innerText();
@@ -122,9 +135,10 @@ await phone.locator('.composer textarea').fill('create a note called Device Prob
 await phone.locator('.composer .send').click();
 await phone.waitForTimeout(2500);
 lastReply = await phone.locator('.bubble.assistant').last().innerText();
+const attachmentCards = await phone.locator('.bubble.assistant .attachment-card').count();
 check(
   'desktop present: assistant now acts on the vault',
-  lastReply.includes('I created') && lastReply.includes('tool call'),
+  lastReply.includes('I created') && attachmentCards > 0,
   lastReply.slice(0, 80)
 );
 

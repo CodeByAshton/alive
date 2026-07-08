@@ -1,19 +1,87 @@
-// The chat pane. Messages are Markdown files inside the chat folder; the
-// in-flight assistant turn streams over the wire and is replaced by the
-// persisted message record when the turn completes.
+// The chat pane, consumer edition: just the conversation. Messages are still
+// Markdown files inside the chat folder; the technical detail (models, tool
+// calls) stays in the files' frontmatter — the UI shows prose, attachments,
+// and a friendly status line while the assistant works.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUp, Check, Loader2, Plus, Wrench, X } from 'lucide-react';
+import { ArrowUp, FileText, Plus } from 'lucide-react';
 
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { useVault } from '../lib/store';
 import { chatMessages, createChat, getChatConfig, listChats } from '../lib/chat';
 import { sendTurn } from '../lib/sync';
+import type { StreamState } from '../lib/types';
 import { Markdown } from './Markdown';
 import { ModelPicker } from './ModelPicker';
+
+const THINKING_PHRASES = [
+  'Thinking…',
+  'Connecting the dots…',
+  'Rummaging through the vault…',
+  'Pondering…',
+  'Almost there…',
+];
+
+const TOOL_PHRASES: Record<string, string> = {
+  create_note: 'Writing a note…',
+  edit_note: 'Editing a note…',
+  append_note: 'Adding to a note…',
+  read_note: 'Reading your notes…',
+  list_files: 'Looking through the vault…',
+  create_folder: 'Tidying things up…',
+  move_path: 'Tidying things up…',
+  delete_path: 'Tidying things up…',
+  run_command: 'Working on your computer…',
+};
+
+function StatusLine({ stream }: { stream: StreamState }) {
+  const [phrase, setPhrase] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => setPhrase((p) => (p + 1) % THINKING_PHRASES.length), 2600);
+    return () => clearInterval(timer);
+  }, []);
+
+  const running = [...stream.tools].reverse().find((t) => t.status === 'running');
+  const label = running ? (TOOL_PHRASES[running.name] ?? 'Working…') : THINKING_PHRASES[phrase];
+
+  return (
+    <div className="status-line flex items-center gap-2 py-0.5">
+      <span className="shimmer-text text-[13px] font-medium">{label}</span>
+    </div>
+  );
+}
+
+function AttachmentCard({ path, compact }: { path: string; compact: boolean }) {
+  const openFile = useVault((s) => s.openFile);
+  const setRailTab = useVault((s) => s.setRailTab);
+  const name = path.split('/').pop()!.replace(/\.md$/, '');
+  const folder = path.split('/').slice(0, -1).join('/');
+
+  return (
+    <button
+      className={cn(
+        'attachment-card flex w-fit max-w-full items-center gap-2.5 rounded-xl border bg-white px-3 py-2 text-left shadow-xs transition-colors',
+        !compact && 'cursor-pointer hover:bg-neutral-50'
+      )}
+      onClick={() => {
+        if (compact) return;
+        openFile(path, 'read');
+        setRailTab('files');
+      }}
+    >
+      <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-neutral-100">
+        <FileText className="size-3.5 text-neutral-500" />
+      </span>
+      <span className="min-w-0">
+        <span className="block truncate text-[12.5px] font-medium text-neutral-800">{name}</span>
+        {folder && <span className="block truncate text-[10.5px] text-neutral-400">{folder}</span>}
+      </span>
+    </button>
+  );
+}
 
 export function Chat({ compact = false }: { compact?: boolean }) {
   const records = useVault((s) => s.records);
@@ -79,7 +147,7 @@ export function Chat({ compact = false }: { compact?: boolean }) {
           <div
             key={m.path}
             className={cn(
-              'bubble max-w-[86%] animate-in fade-in-0 slide-in-from-bottom-1 duration-200',
+              'bubble flex max-w-[86%] flex-col gap-2 animate-in fade-in-0 slide-in-from-bottom-1 duration-200',
               m.role === 'user'
                 ? 'user self-end rounded-2xl rounded-br-md bg-neutral-900 px-3.5 py-2 text-white'
                 : 'assistant self-start'
@@ -90,50 +158,35 @@ export function Chat({ compact = false }: { compact?: boolean }) {
             ) : (
               <>
                 <Markdown text={m.body} size="sm" />
-                <div className="bubble-meta mt-1.5 flex items-center gap-2 font-mono text-[10.5px] text-neutral-400">
-                  {m.model}
-                  {m.toolsUsed?.length ? (
-                    <span className="flex items-center gap-1">
-                      <Wrench className="size-2.5" />
-                      {m.toolsUsed.length} tool call{m.toolsUsed.length > 1 ? 's' : ''}
-                    </span>
-                  ) : null}
-                </div>
+                {m.filesTouched && m.filesTouched.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {m.filesTouched.map((path) => (
+                      <AttachmentCard key={path} path={path} compact={compact} />
+                    ))}
+                  </div>
+                )}
               </>
             )}
           </div>
         ))}
 
         {stream && (stream.active || stream.error) && (
-          <div className="bubble assistant streaming max-w-[86%] self-start">
-            {stream.tools.length > 0 && (
-              <div className="mb-1.5 flex flex-wrap gap-1">
-                {stream.tools.map((t, i) => (
-                  <Badge key={i} variant="secondary" className="gap-1 font-mono text-[10.5px] font-normal text-neutral-500">
-                    {t.status === 'running' ? (
-                      <Loader2 className="size-2.5 animate-spin" />
-                    ) : t.status === 'done' ? (
-                      <Check className="size-2.5" />
-                    ) : (
-                      <X className="size-2.5" />
-                    )}
-                    {t.name}
-                  </Badge>
-                ))}
+          <div className="bubble assistant streaming flex max-w-[86%] flex-col gap-1.5 self-start">
+            {stream.active && <StatusLine stream={stream} />}
+            {stream.text && <Markdown text={stream.text} size="sm" />}
+            {stream.error && (
+              <div className="stream-error rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-[12.5px] text-neutral-500">
+                Hmm, that didn't go through. Mind trying again?
+                <span className="mt-0.5 block font-mono text-[10.5px] text-neutral-400">{stream.error}</span>
               </div>
             )}
-            {stream.text && <Markdown text={stream.text} size="sm" />}
-            {stream.active && !stream.text && !stream.tools.length && (
-              <Loader2 className="size-4 animate-spin text-neutral-300" />
-            )}
-            {stream.error && <div className="stream-error mt-1 font-mono text-xs text-destructive">⚠ {stream.error}</div>}
           </div>
         )}
 
         {!messages.length && !stream?.active && (
           <div className="chat-empty m-auto text-center text-[13px] text-neutral-400">
             <p>
-              Ask anything — or try a skill:{' '}
+              Ask anything — or try{' '}
               <code className="rounded-md border bg-neutral-100 px-1.5 py-px font-mono text-xs">/summarize</code>{' '}
               <code className="rounded-md border bg-neutral-100 px-1.5 py-px font-mono text-xs">/journal</code>{' '}
               <code className="rounded-md border bg-neutral-100 px-1.5 py-px font-mono text-xs">/task</code>
@@ -143,12 +196,12 @@ export function Chat({ compact = false }: { compact?: boolean }) {
       </div>
 
       <div className="composer shrink-0 px-3 pb-3">
-        <div className="flex items-end gap-2 rounded-2xl border bg-white p-2 shadow-xs focus-within:border-neutral-400 transition-colors">
+        <div className="flex items-end gap-2 rounded-2xl border bg-white p-2 shadow-xs transition-colors focus-within:border-neutral-400">
           <Textarea
             value={draft}
-            placeholder={activeChat ? 'Message…  ( / for skills, [[ to reference notes )' : 'Create a chat first'}
+            placeholder={activeChat ? 'Message…' : 'Create a chat first'}
             disabled={!activeChat}
-            rows={compact ? 2 : 2}
+            rows={2}
             className="min-h-0 flex-1 resize-none border-0 bg-transparent p-1.5 shadow-none focus-visible:ring-0"
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {

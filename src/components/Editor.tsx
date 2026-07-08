@@ -15,6 +15,7 @@ import { parseFrontmatter } from '../../shared/frontmatter.mjs';
 import { useVault } from '../lib/store';
 import { putRecord } from '../lib/sync';
 import { Markdown } from './Markdown';
+import { Properties } from './Properties';
 
 export function Editor() {
   const activePath = useVault((s) => s.activePath);
@@ -72,7 +73,6 @@ export function Editor() {
     () => (record ? parseFrontmatter(record.content) : { data: {}, body: '' }),
     [record?.content]
   );
-  const properties = Object.entries(parsed.data);
 
   if (!activePath) {
     return (
@@ -111,18 +111,7 @@ export function Editor() {
       ) : (
         <div className="editor-preview quiet-scroll flex-1 overflow-y-auto">
           <div className="mx-auto max-w-[72ch] px-8 py-8 pb-[35vh]">
-            {properties.length > 0 && (
-              <div className="mb-6 flex flex-col gap-1 rounded-xl border bg-neutral-50/60 px-4 py-3">
-                {properties.map(([key, value]) => (
-                  <div key={key} className="flex gap-3 text-[12.5px]">
-                    <span className="w-24 shrink-0 text-neutral-400">{key}</span>
-                    <span className="font-mono text-xs leading-5 text-neutral-600">
-                      {typeof value === 'string' ? value : JSON.stringify(value)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
+            {record && <Properties key={record.path} record={record} />}
             <Markdown text={parsed.body} />
           </div>
         </div>

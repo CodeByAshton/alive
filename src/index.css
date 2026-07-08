@@ -131,6 +131,20 @@
 .editor-cm .cm-gutters { display: none; }
 .editor-cm .cm-selectionBackground { background: oklch(0.9 0 0) !important; }
 
+/* shimmer status text — Claude-style working indicator */
+.shimmer-text {
+  background: linear-gradient(90deg, #a3a3a3 25%, #171717 50%, #a3a3a3 75%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 1.8s linear infinite;
+}
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
 /* thin quiet scrollbars for plain overflow areas */
 .quiet-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
 .quiet-scroll::-webkit-scrollbar-thumb {

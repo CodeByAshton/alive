@@ -302,6 +302,20 @@ export async function runTurn({ store, presence, chatPath, text, deviceType, pro
 
   broadcast({ type: 'turn_started', chatPath, provider, model });
 
+  // Track vault files this turn touched so clients can show them as
+  // attachments on the assistant's message.
+  const filesTouched = [];
+  const baseExecutor = makeToolExecutor(store, execRemote);
+  const trackingExecutor = async (name, input) => {
+    const result = await baseExecutor(name, input);
+    if (['create_note', 'edit_note', 'append_note'].includes(name) && input?.path) {
+      filesTouched.push(sanitizePath(input.path));
+    } else if (name === 'move_path' && input?.to) {
+      filesTouched.push(sanitizePath(input.to));
+    }
+    return result;
+  };
+
   const engine = getEngine(provider);
   let result;
   try {
@@ -310,7 +324,7 @@ export async function runTurn({ store, presence, chatPath, text, deviceType, pro
       system,
       messages,
       tools,
-      executeTool: makeToolExecutor(store, execRemote),
+      executeTool: trackingExecutor,
       onEvent: (event) => {
         if (event.type === 'text') broadcast({ type: 'turn_delta', chatPath, text: event.text });
         else if (event.type === 'tool_start') broadcast({ type: 'turn_tool', chatPath, name: event.name, status: 'running' });
@@ -336,6 +350,7 @@ export async function runTurn({ store, presence, chatPath, text, deviceType, pro
         provider,
         model,
         tools_used: result.toolsUsed,
+        ...(filesTouched.length ? { files_touched: [...new Set(filesTouched)] } : {}),
         ...(skill ? { skill: skill.trigger } : {}),
       },
       result.text.trim() || '(no response)'
