@@ -2,73 +2,134 @@
 
 An AI-native workspace: an Obsidian-style vault that lives in the cloud, syncs in real time across genuinely separate devices, and has an assistant that is a first-class inhabitant of the vault — not a chat box bolted on.
 
-## Your next steps (no tech background needed)
+## Getting to production — the complete step-by-step guide
 
-Everything below is copy-paste. You'll need the **Terminal** app (on a Mac: press `Cmd+Space`, type "Terminal", press Enter).
+This is everything you personally need to do to take Vault from this repository to a real product people can use. Written assuming no technical background — every command is copy-paste. You'll use the **Terminal** app (on a Mac: press `Cmd+Space`, type "Terminal", press Enter). One rule to remember: **lines starting with `export` set secrets for the current Terminal window only — re-paste them whenever you open a new window.**
 
-**Step 1 — Run Vault on your computer.**
-Install Node.js first (go to [nodejs.org](https://nodejs.org), download, double-click, next-next-finish). Then in Terminal, inside this project's folder, paste:
+### Part A — See it working on your computer (~15 minutes)
+
+**A1. Install Node.js.** Go to [nodejs.org](https://nodejs.org), download the "LTS" version, double-click, next-next-finish. This is the engine that runs Vault.
+
+**A2. Start Vault with the practice AI** (no accounts or keys needed). In Terminal, go into this project's folder (type `cd `, drag the folder onto the Terminal window, press Enter), then paste:
 
 ```bash
 npm install
 VAULT_ENABLE_MOCK=1 npm run dev
 ```
 
-Open **http://localhost:5173** in your browser. That's Vault, running with a practice AI (no account needed). Leave the Terminal window open while you use it.
+Open **http://localhost:5173** in your browser. That's Vault. Leave the Terminal window open — closing it turns Vault off.
 
-**Step 2 — Plug in the real AI.**
-Create an API key at [console.anthropic.com](https://console.anthropic.com) (sign up → API Keys → Create Key → copy it). Then start Vault like this instead, pasting your key in place of the dots:
+**A3. (Recommended) Run the built-in test suites** so you know your copy is healthy:
+
+```bash
+npm run test:auth     # should end "11/11 auth checks passed"
+npm run test:oauth    # should end "8/8 oauth checks passed"
+```
+
+### Part B — Plug in the real AI (~5 minutes)
+
+**B1.** Create an account at [console.anthropic.com](https://console.anthropic.com), add a payment method, then **API Keys → Create Key** and copy it. This key is how the assistant thinks; Anthropic bills you per use.
+
+**B2.** Start Vault with the key (paste yours in place of the dots):
 
 ```bash
 export ANTHROPIC_API_KEY=...
 npm run dev
 ```
 
-**Step 3 — Make your vault permanent (Supabase).**
-Right now your notes live in a file on this computer. To keep them safe in your Supabase database instead: open your [Supabase dashboard](https://supabase.com/dashboard) → your project → **Project Settings** → **API Keys** → copy the **service_role** key (keep it secret — it's a master key). Then start Vault like this:
+Start a chat and talk to it. This is the first time the real model runs through the whole system — if anything behaves oddly here, that's the first thing to report next session.
+
+### Part C — Make the vault permanent with your database (~10 minutes)
+
+Right now notes live in a file on your computer. Your Supabase database (already set up — the tables exist) makes them permanent.
+
+**C1.** Open your [Supabase dashboard](https://supabase.com/dashboard) → your project → **Project Settings → API Keys** → copy the **service_role** key. Treat it like a master password — never paste it anywhere public.
+
+**C2.** Verify, then run:
 
 ```bash
 export SUPABASE_URL=https://tjwlmdadhtywffsoeulv.supabase.co
-export SUPABASE_SERVICE_KEY=...   # the service_role key you copied
-npm run smoke:supabase            # quick health check — should say PASS on every line
+export SUPABASE_SERVICE_KEY=...      # the service_role key
+npm run smoke:supabase               # must say PASS on every line
 npm run dev
 ```
 
-The database tables are already set up. Once this works, your vault survives anything happening to this computer.
+### Part D — Put it on the internet (~30 minutes, the big one)
 
-**Step 4 — Put it on the internet (so your phone works anywhere).**
-This uses Fly.io (has a free tier). Install their tool from [fly.io/docs/flyctl/install](https://fly.io/docs/flyctl/install/), then:
+After this, your phone works from anywhere, sign-in accounts are on, and other people can use it.
+
+**D1.** Create a free account at [fly.io](https://fly.io), then install their command-line tool: [fly.io/docs/flyctl/install](https://fly.io/docs/flyctl/install/) (one copy-paste command).
+
+**D2.** In the project folder:
 
 ```bash
 fly launch --copy-config --no-deploy
-fly secrets set VAULT_KEY=pick-a-long-secret-password SUPABASE_URL=https://tjwlmdadhtywffsoeulv.supabase.co SUPABASE_SERVICE_KEY=... ANTHROPIC_API_KEY=...
+```
+
+It asks a few questions — accepting the suggestions is fine.
+
+**D3. Set your secrets.** The most important step; go slowly and replace every `...`:
+
+```bash
+fly secrets set \
+  VAULT_AUTH=accounts \
+  SUPABASE_URL=https://tjwlmdadhtywffsoeulv.supabase.co \
+  SUPABASE_SERVICE_KEY=... \
+  SUPABASE_ANON_KEY=sb_publishable_qKIF-FojyKP7Jg7HI-TlPQ_Q5oiY3gD \
+  ANTHROPIC_API_KEY=... \
+  VAULT_SECRET_KEY=$(openssl rand -hex 32)
+```
+
+What each one does: `VAULT_AUTH=accounts` turns on email sign-in — each person gets their own private vault, which is what makes this sellable. The `ANON_KEY` is public by design (safe to share). `VAULT_SECRET_KEY` locks connector authorizations — that command generates a random one for you.
+
+**D4. Deploy:**
+
+```bash
 fly deploy
 ```
 
-Fly gives you a web address like `https://your-app.fly.dev`. Open it anywhere — on your phone, add `?server=https://your-app.fly.dev&key=your-secret-password` the first time. Pick a long, random `VAULT_KEY`: it is the password to your entire vault.
+Fly prints your address, like `https://your-app.fly.dev`. Open it — you should see the **sign-in screen**. Create your account. You're live.
 
-**Step 5 — Let the assistant use your computer.**
-When you want the assistant to be able to run things on your laptop (from your phone, by voice), run this on the laptop and leave it open:
+**D5. One Supabase toggle:** dashboard → **Authentication → Sign In / Up** → turn **off** "Confirm email" if you want sign-ups to work instantly (leave it on to make people verify their email first — Supabase sends those emails for you).
+
+**D6. Lock the door** once everything works:
+
+```bash
+fly secrets set VAULT_ALLOWED_ORIGINS=https://your-app.fly.dev
+fly deploy
+```
+
+### Part E — Connect your devices to the deployed Vault
+
+- **Phone:** open `https://your-app.fly.dev` in the phone's browser and sign in. Use "Add to Home Screen" for an app-like feel.
+- **Your computer, as the assistant's hands** (lets it run commands for you):
 
 ```bash
 npm run node-harness -- --server wss://your-app.fly.dev
 ```
 
-Every command it wants to run shows an **Approve / Deny** card on your screen first. There's also a pause switch under **Devices** in the sidebar that stops the assistant everywhere, instantly.
+Every command shows an **Approve / Deny** card on your screens first; the pause switch under **Devices** stops the assistant everywhere, instantly.
 
-**Step 6 — Your notes are always yours.**
-Settings (gear icon) → **Export vault** downloads everything as a zip of plain Markdown files at any time.
+- **Connectors:** in the app, Customize → Connectors → pick Notion/Linear/etc. → **Connect** → approve in the popup. (OAuth popups need the deployed HTTPS address, so do this after Part D.)
+- **Your notes are always yours:** Settings (gear icon) → **Export vault** downloads everything as plain Markdown, any time.
 
-**Step 7 (optional) — Real sign-in accounts instead of the shared password.**
-Want each person to sign in with their own email and get their own private vault? Add these two lines to Step 4's `fly secrets set` command (the second value is safe to share — it's the public key):
+### Part F — What still needs things only you can get
+
+| To ship | You need | Then |
+| --- | --- | --- |
+| **Selling it — next build** | A [Stripe](https://stripe.com) account (free to create) | The pricing plan is written up in `NEXT_STEPS.md` — subscriptions, free tier, usage limits |
+| Mac desktop app | Apple Developer account ($99/yr) + a Mac | Signing gets wired into the release workflow; installers then build automatically |
+| iPhone App Store app | Same Apple account + a Mac with Xcode | `npm run ios:sync`, open in Xcode, TestFlight → App Store |
+| Custom domain (vault.yourname.com) | The domain (~$12/yr) | `fly certs add vault.yourname.com` + one DNS record at your registrar |
+
+### Quick health checks, any time
 
 ```bash
-fly secrets set VAULT_AUTH=accounts SUPABASE_ANON_KEY=sb_publishable_qKIF-FojyKP7Jg7HI-TlPQ_Q5oiY3gD
+npm run test:auth      # accounts security (offline, no setup needed)
+npm run test:oauth     # connector OAuth (offline, no setup needed)
+npm run smoke:supabase # live database round-trip (needs the two SUPABASE exports)
+npm run e2e            # 39 end-to-end checks (start dev first: VAULT_ENABLE_MOCK=1 VAULT_FETCH_ALLOW=localhost npm run dev)
 ```
-
-Then the app shows a sign-in screen: create an account with your email and a password, and everything works as before — but private to you. (In your Supabase dashboard under **Authentication → Sign In / Up**, turn off "Confirm email" if you want sign-ups to work instantly without a confirmation email.)
-
-**What still needs a developer:** publishing the desktop app installers (needs an Apple developer account) and the iPhone App Store version (needs a Mac with Xcode). Everything else above you can do yourself.
 
 ---
 

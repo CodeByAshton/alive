@@ -2,7 +2,31 @@
 
 Working checklist for upcoming sessions. State of the world: the prototype is feature-complete and
 covered by `npm run e2e` (39 checks, keyless via the mock engine) plus `npm run test:auth`
-(11 offline accounts-mode checks) and `npm run test:oauth` (8 offline connector-OAuth checks). Everything below is what stands
+(11 offline accounts-mode checks) and `npm run test:oauth` (8 offline connector-OAuth checks).
+
+## 0. Pricing & billing — NEXT UP
+
+The goal: sell Vault as a subscription. Accounts + per-user vaults already exist, so billing is
+"attach a plan to a user and enforce it." The plan, in build order:
+
+- [ ] **Stripe foundation**: Stripe account (owner creates it, free) → products/prices (e.g. Free,
+      Pro monthly, Pro yearly) → `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` env on the server
+- [ ] **Checkout + portal**: `/api/billing/checkout` (Stripe Checkout session for the signed-in
+      user) and `/api/billing/portal` (Stripe's hosted manage/cancel page) — Stripe hosts all
+      payment UI, we never touch card data
+- [ ] **Webhook → entitlements**: `/api/billing/webhook` consumes `checkout.session.completed` /
+      `customer.subscription.updated|deleted` and writes a `plan` + `status` onto the user's vault
+      row (new `plan` column, migration) — the server already loads that row on every connection
+- [ ] **Enforcement**: per-plan limits checked where turns start — e.g. Free: N assistant turns/day,
+      1 connector, no node harness; Pro: unlimited turns (fair-use rate limit stays), unlimited
+      connectors, exec. Limits live in one table in code so pricing changes are one edit
+- [ ] **UI**: plan badge + Upgrade button in Settings; friendly "you've used today's free turns"
+      message in chat when a limit hits (upsell, not a wall)
+- [ ] **Model economics decision** (owner): bundled AI (your `ANTHROPIC_API_KEY`, price covers
+      tokens — simplest for buyers) vs bring-your-own-key (they set their key, you charge for the
+      product — zero token risk) vs both (BYOK on Free, bundled on Pro). Recommended: both
+- [ ] **Offline test**: `npm run test:billing` with a mock Stripe webhook (same pattern as
+      test-auth/test-oauth) — entitlement changes, limit enforcement, downgrade behavior Everything below is what stands
 between this and something strangers can download and trust.
 
 ## 1. Validate the real model path (first — everything else builds on it)
