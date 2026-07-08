@@ -19,10 +19,12 @@ between this and something strangers can download and trust.
 - [x] Per-command approval for `run_command` (voice-initiated, screen-confirmed: approve on any trusted surface)
 - [x] Permission modes, Claude-style — Ask first / Auto / Read-only; default chosen in Settings,
       stored vault-wide (`.vault/settings.json`) so every device and session agrees
-- [ ] Command allowlist / workspace confinement options in the node harness; audit log of every exec
+- [x] Command allowlist (`--allow git,npm,...`), workspace confinement, and a JSONL audit log of
+      every exec (`~/.vault-node/audit.jsonl`) in the node harness
 - [x] Kill switch: pause the agent from any surface (Devices panel); per-device revocation still open
 - [ ] Scope connector tools (per-connector allow/ask policy); never log tokens; encrypt secrets at rest
-- [ ] Rate limiting + input size caps on the WS API; authenticated CORS instead of `*`
+- [x] Rate limiting (token bucket per connection) + input size caps (2 MB WS payload, 1.5 MB file,
+      32k turn text); CORS restrictable via `VAULT_ALLOWED_ORIGINS`
 
 ## 3. Cloud backend for real multi-user use
 - [x] Swap the JSON-file VaultStore for Supabase Postgres — `server/store-supabase.mjs`
@@ -35,7 +37,8 @@ between this and something strangers can download and trust.
       (single-writer server + WS remains the architecture until then)
 - [ ] Blob/attachment storage for non-Markdown files (images in notes)
 - [ ] Backups + export (zip of the vault = plain Markdown folder)
-- [ ] Deploy story: Fly/Railway/VPS container for the vault server + TLS; document `VAULT_REMOTE`
+- [x] Deploy story: one-container Dockerfile (client + API + WS) + `fly.toml`; README "Deploy"
+      section covers secrets, CORS lockdown, and pointing devices at the deployed URL
 
 ## 4. Desktop app shipping
 - [ ] First `npm run desktop` smoke test on a real Mac (Electron couldn't launch in the dev sandbox)

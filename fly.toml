@@ -1,0 +1,19 @@
+# Fly.io deploy for the vault server. One small machine is plenty:
+#   fly launch --copy-config --no-deploy   # creates the app from this file
+#   fly secrets set VAULT_KEY=... SUPABASE_URL=... SUPABASE_SERVICE_KEY=... ANTHROPIC_API_KEY=...
+#   fly deploy
+# With Supabase configured the machine is stateless — no volume needed.
+
+app = "vault"
+primary_region = "sjc"
+
+[http_service]
+  internal_port = 8787
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

@@ -1,0 +1,10 @@
+node_modules
+dist
+release
+ios
+desktop
+server/data
+.git
+.agents
+.claude
+*.log

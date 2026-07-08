@@ -70,6 +70,17 @@ Open **`http://localhost:5173/?surface=desktop`** on your laptop and **`http://<
 
 Production-ish: `npm run build && npm start` serves the built client and the API from one process on `:8787`.
 
+## Deploy
+
+The whole thing ships as one container (client + API + WS on `:8787`) — see the `Dockerfile`:
+
+```bash
+docker build -t vault .
+docker run -p 8787:8787 -e VAULT_KEY=... -e SUPABASE_URL=... -e SUPABASE_SERVICE_KEY=... -e ANTHROPIC_API_KEY=... vault
+```
+
+With Supabase configured the container is stateless (the vault lives in Postgres); without it, mount a volume at `/data`. A ready `fly.toml` is included for Fly.io (`fly launch --copy-config --no-deploy`, set secrets, `fly deploy`). For a hardened deployment also set `VAULT_ALLOWED_ORIGINS` (comma-separated) instead of the default open CORS, and pick a strong `VAULT_KEY`. Phones and other devices connect to the deployed URL with `?server=https://your-app.fly.dev&key=...`.
+
 ## Demo script (definition of done)
 
 1. Open the app → vault tree with seeded notes, graph in the right rail.

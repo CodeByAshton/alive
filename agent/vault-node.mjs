@@ -12,12 +12,18 @@
 //   --key        shared vault key                        (VAULT_KEY)
 //   --workspace  directory commands run in               (VAULT_WORKSPACE, default cwd)
 //   --name       device name shown in presence           (VAULT_NODE_NAME, default host)
+//   --allow      comma list of allowed first words,      (VAULT_ALLOW)
+//                e.g. "git,npm,node,ls,cat" — unset allows everything
+//   --audit      audit log path (JSONL, one line/exec)   (VAULT_AUDIT,
+//                default ~/.vault-node/audit.jsonl)
 //
-// TODO: trust boundary — this executes shell commands sent by the harness on
-// behalf of a (possibly voice-initiated) agent. A real version needs device
-// attestation, per-command approval or an allowlist, and a kill switch.
+// Every command is already screen-confirmed server-side (or covered by the
+// vault's Auto mode); the allowlist here is defense in depth on the machine
+// itself, and the audit log is the machine's own record of what ran.
+// TODO: trust boundary — device attestation is the remaining piece.
 
 import { exec } from 'node:child_process';
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import WebSocket from 'ws';
@@ -32,6 +38,8 @@ const SERVER = arg('--server', 'VAULT_SERVER', 'ws://localhost:8787');
 const KEY = arg('--key', 'VAULT_KEY', 'vault-dev-key');
 const WORKSPACE = path.resolve(arg('--workspace', 'VAULT_WORKSPACE', process.cwd()));
 const NAME = arg('--name', 'VAULT_NODE_NAME', os.hostname().split('.')[0]);
+const ALLOW = (arg('--allow', 'VAULT_ALLOW', '') || '').split(',').map((s) => s.trim()).filter(Boolean);
+const AUDIT = path.resolve(arg('--audit', 'VAULT_AUDIT', path.join(os.homedir(), '.vault-node', 'audit.jsonl')));
 
 const MAX_OUTPUT = 8000;
 let backoff = 1000;
@@ -40,11 +48,60 @@ function log(...parts) {
   console.log(new Date().toISOString().slice(11, 19), ...parts);
 }
 
+function audit(entry) {
+  try {
+    fs.mkdirSync(path.dirname(AUDIT), { recursive: true });
+    fs.appendFileSync(AUDIT, JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n');
+  } catch (err) {
+    log(`audit write failed: ${err.message}`);
+  }
+}
+
+// Confinement: the resolved cwd must be the workspace or inside it.
+// (A plain startsWith check would let /workspace-evil slip past.)
+function insideWorkspace(cwd) {
+  const rel = path.relative(WORKSPACE, cwd);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+// Optional allowlist: the command's first word must match. Shell chaining
+// (;, |, &&, $(), backticks, redirects) is refused outright when an
+// allowlist is set, since it would smuggle other programs past the check.
+// This is defense in depth — the server-side approval flow is the real gate.
+function allowed(command) {
+  if (!ALLOW.length) return { ok: true };
+  if (/[;|&`$<>]/.test(command)) {
+    return { ok: false, reason: `shell operators are blocked by this machine's allowlist (${ALLOW.join(', ')})` };
+  }
+  const first = command.trim().split(/\s+/)[0];
+  if (!ALLOW.includes(first)) {
+    return { ok: false, reason: `"${first}" is not in this machine's allowlist (${ALLOW.join(', ')})` };
+  }
+  return { ok: true };
+}
+
 function runCommand(input) {
   return new Promise((resolve) => {
+    const started = Date.now();
+    const done = (result) => {
+      audit({
+        command: String(input.command ?? ''),
+        cwd: input.cwd ?? null,
+        ok: result.ok,
+        ms: Date.now() - started,
+        bytes: result.output.length,
+      });
+      resolve(result);
+    };
     const cwd = input.cwd ? path.resolve(WORKSPACE, input.cwd) : WORKSPACE;
-    if (!cwd.startsWith(WORKSPACE)) {
-      resolve({ ok: false, output: `cwd escapes the workspace (${WORKSPACE})` });
+    if (!insideWorkspace(cwd)) {
+      done({ ok: false, output: `cwd escapes the workspace (${WORKSPACE})` });
+      return;
+    }
+    const gate = allowed(String(input.command ?? ''));
+    if (!gate.ok) {
+      log(`refused: ${input.command}`);
+      done({ ok: false, output: gate.reason });
       return;
     }
     log(`$ ${input.command}${input.cwd ? `  (in ${input.cwd})` : ''}`);
@@ -52,22 +109,22 @@ function runCommand(input) {
       let output = [stdout, stderr].filter(Boolean).join('\n---stderr---\n').trim();
       if (output.length > MAX_OUTPUT) output = output.slice(0, MAX_OUTPUT) + `\n…(truncated)`;
       if (err && err.killed) {
-        resolve({ ok: false, output: `${output}\n(command timed out)`.trim() });
+        done({ ok: false, output: `${output}\n(command timed out)`.trim() });
       } else if (err) {
-        resolve({ ok: true, output: `${output}\n(exit code ${err.code ?? 1})`.trim() });
+        done({ ok: true, output: `${output}\n(exit code ${err.code ?? 1})`.trim() });
       } else {
-        resolve({ ok: true, output: output || '(no output)' });
+        done({ ok: true, output: output || '(no output)' });
       }
     });
   });
 }
 
 function connect() {
+  // Capabilities are assigned by the server from the device type.
   const params = new URLSearchParams({
     key: KEY,
     deviceId: `node-${NAME}`,
     deviceType: 'node',
-    caps: 'read,write,exec',
   });
   const url = `${SERVER.replace(/\/$/, '')}/ws?${params}`;
   const ws = new WebSocket(url);
@@ -76,6 +133,8 @@ function connect() {
     backoff = 1000;
     log(`connected to ${SERVER} as node-${NAME}`);
     log(`workspace: ${WORKSPACE}`);
+    if (ALLOW.length) log(`allowlist: ${ALLOW.join(', ')}`);
+    log(`audit log: ${AUDIT}`);
     log('this machine can now act for the assistant — Ctrl-C to revoke');
   });
 

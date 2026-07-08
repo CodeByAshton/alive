@@ -44,9 +44,13 @@ const presence = new PresenceRegistry();
 
 const app = express();
 // Native shells (the iOS app) call the API cross-origin. The vault key is the
-// gate; CORS just lets the request through. TODO: trust boundary.
+// gate; CORS just lets the request through. Lock it down for a deployment by
+// listing origins: VAULT_ALLOWED_ORIGINS=https://vault.example,capacitor://localhost
+const ALLOWED_ORIGINS = (process.env.VAULT_ALLOWED_ORIGINS || '*').split(',').map((s) => s.trim());
 app.use('/api', (req, res, next) => {
-  res.set('Access-Control-Allow-Origin', '*');
+  const origin = req.headers.origin;
+  if (ALLOWED_ORIGINS.includes('*')) res.set('Access-Control-Allow-Origin', '*');
+  else if (origin && ALLOWED_ORIGINS.includes(origin)) res.set('Access-Control-Allow-Origin', origin);
   res.set('Access-Control-Allow-Headers', 'content-type');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
@@ -68,7 +72,36 @@ app.get(/^\/(?!api|ws).*/, (_req, res, next) => {
 });
 
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: '/ws' });
+// maxPayload caps a single WS frame (a put with a very large note still fits;
+// anything bigger is dropped by ws before it reaches the handler).
+const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 2 * 1024 * 1024 });
+
+// Per-connection rate limit: a lazy token bucket. Generous enough for an
+// offline outbox flushing on reconnect, tight enough to stop a runaway or
+// hostile client from flooding the vault.
+const RATE_CAPACITY = 150; // burst
+const RATE_REFILL = 40; // sustained msgs/sec
+function makeRateLimiter() {
+  let tokens = RATE_CAPACITY;
+  let last = Date.now();
+  let warned = 0;
+  return () => {
+    const now = Date.now();
+    tokens = Math.min(RATE_CAPACITY, tokens + ((now - last) / 1000) * RATE_REFILL);
+    last = now;
+    if (tokens < 1) {
+      const warn = now - warned > 1000; // don't flood the flooder either
+      warned = warn ? now : warned;
+      return { ok: false, warn };
+    }
+    tokens -= 1;
+    return { ok: true };
+  };
+}
+
+// Input size caps (payload cap above is the hard ceiling).
+const MAX_TURN_TEXT = 32_000;
+const MAX_CONTENT = 1_500_000;
 
 const sockets = new Set();
 function broadcast(message) {
@@ -190,9 +223,15 @@ wss.on('connection', (ws, req) => {
   sockets.add(ws);
   conns.set(connId, { ws, descriptor });
   presence.join(connId, descriptor);
+  const takeToken = makeRateLimiter();
   ws.send(JSON.stringify({ type: 'hello', presence: presence.snapshot(), rev: store.rev, paused: assistantPaused, mode: assistantMode }));
 
   ws.on('message', async (raw) => {
+    const token = takeToken();
+    if (!token.ok) {
+      if (token.warn) ws.send(JSON.stringify({ type: 'error', error: 'rate limited — slow down' }));
+      return;
+    }
     let msg;
     try {
       msg = JSON.parse(raw.toString());
@@ -205,6 +244,10 @@ wss.on('connection', (ws, req) => {
           ws.send(JSON.stringify({ type: 'records', records: store.since(msg.since ?? 0), rev: store.rev }));
           break;
         case 'put':
+          if (typeof msg.record?.content === 'string' && msg.record.content.length > MAX_CONTENT) {
+            ws.send(JSON.stringify({ type: 'error', error: 'file too large to sync (1.5 MB cap)' }));
+            break;
+          }
           store.put(msg.record);
           break;
         case 'delete':
@@ -251,7 +294,7 @@ wss.on('connection', (ws, req) => {
               store,
               presence,
               chatPath: msg.chatPath,
-              text: String(msg.text ?? ''),
+              text: String(msg.text ?? '').slice(0, MAX_TURN_TEXT),
               deviceType: descriptor.deviceType,
               provider: msg.provider || 'anthropic',
               model: msg.model || 'claude-opus-4-8',
