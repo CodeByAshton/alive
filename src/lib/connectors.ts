@@ -4,7 +4,7 @@
 import { parseFrontmatter, serializeFrontmatter } from '../../shared/frontmatter.mjs';
 import { putRecord } from './sync';
 import { getServerConfig } from './config';
-import { getVaultKey } from './device';
+import { authQuery } from './auth';
 import type { VaultRecord } from './types';
 
 export interface Connector {
@@ -69,7 +69,7 @@ export function newConnectorPath(records: Map<string, VaultRecord>): string {
 export async function fetchConnectorStatus(): Promise<ConnectorStatus[]> {
   const server = getServerConfig();
   if (!server) return [];
-  const res = await fetch(`${server.httpBase}/api/connectors?key=${encodeURIComponent(getVaultKey())}`);
+  const res = await fetch(`${server.httpBase}/api/connectors?${await authQuery()}`);
   if (!res.ok) throw new Error(`status ${res.status}`);
   return (await res.json()).connectors ?? [];
 }

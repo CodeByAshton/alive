@@ -5,7 +5,7 @@
 // device, Claude-style: confirm each command, run unattended, or read-only.
 
 import { useEffect, useState } from 'react';
-import { Download, Settings } from 'lucide-react';
+import { Download, LogOut, Settings } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -28,7 +28,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useVault } from '../lib/store';
 import { putRecord, setAssistantMode } from '../lib/sync';
 import { getServerConfig } from '../lib/config';
-import { getVaultKey } from '../lib/device';
+import { authMode, authQuery, signOut } from '../lib/auth';
 import type { AssistantMode } from '../lib/types';
 
 const AGENT_PATH = '.vault/AGENT.md';
@@ -105,18 +105,33 @@ export function SettingsDialog() {
         </div>
 
         <DialogFooter className="items-center sm:justify-between">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="export-vault text-neutral-500"
-            title="Download the whole vault as a zip of Markdown files"
-            onClick={() => {
-              const server = getServerConfig();
-              if (server) window.open(`${server.httpBase}/api/export?key=${encodeURIComponent(getVaultKey())}`, '_blank');
-            }}
-          >
-            <Download className="size-3.5" /> Export vault
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="export-vault text-neutral-500"
+              title="Download the whole vault as a zip of Markdown files"
+              onClick={async () => {
+                const server = getServerConfig();
+                if (server) window.open(`${server.httpBase}/api/export?${await authQuery()}`, '_blank');
+              }}
+            >
+              <Download className="size-3.5" /> Export vault
+            </Button>
+            {authMode() === 'accounts' && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="sign-out text-neutral-500"
+                onClick={async () => {
+                  await signOut();
+                  location.reload();
+                }}
+              >
+                <LogOut className="size-3.5" /> Sign out
+              </Button>
+            )}
+          </div>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => setOpen(false)}>
               Cancel

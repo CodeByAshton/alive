@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 import { startSync, surface } from './lib/sync';
 import { useVault } from './lib/store';
 import { getServerConfig } from './lib/config';
+import { hasSession, loadAuthConfig } from './lib/auth';
+import { SignIn } from './components/SignIn';
 import { Sidebar } from './components/Sidebar';
 import { Editor } from './components/Editor';
 import { Chat } from './components/Chat';
@@ -61,12 +63,35 @@ function Desktop() {
 export default function App() {
   const hydrated = useVault((s) => s.hydrated);
   const configured = getServerConfig() !== null;
+  // 'loading' -> ask the server how it authenticates; 'signin' -> accounts
+  // mode without a session; 'ready' -> sync running.
+  const [auth, setAuth] = useState<'loading' | 'signin' | 'ready'>('loading');
 
   useEffect(() => {
-    if (configured) startSync();
+    if (!configured) return;
+    (async () => {
+      const server = getServerConfig()!;
+      const cfg = await loadAuthConfig(server.httpBase);
+      if (cfg.auth === 'accounts' && !(await hasSession())) {
+        setAuth('signin');
+        return;
+      }
+      setAuth('ready');
+      startSync();
+    })();
   }, [configured]);
 
   if (!configured) return <Connect />;
-  if (!hydrated) return <div className="boot grid h-full place-items-center text-sm text-neutral-400">Opening vault…</div>;
+  if (auth === 'signin')
+    return (
+      <SignIn
+        onSignedIn={() => {
+          setAuth('ready');
+          startSync();
+        }}
+      />
+    );
+  if (auth === 'loading' || !hydrated)
+    return <div className="boot grid h-full place-items-center text-sm text-neutral-400">Opening vault…</div>;
   return surface === 'phone' ? <Phone /> : <Desktop />;
 }

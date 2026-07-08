@@ -59,6 +59,15 @@ Every command it wants to run shows an **Approve / Deny** card on your screen fi
 **Step 6 — Your notes are always yours.**
 Settings (gear icon) → **Export vault** downloads everything as a zip of plain Markdown files at any time.
 
+**Step 7 (optional) — Real sign-in accounts instead of the shared password.**
+Want each person to sign in with their own email and get their own private vault? Add these two lines to Step 4's `fly secrets set` command (the second value is safe to share — it's the public key):
+
+```bash
+fly secrets set VAULT_AUTH=accounts SUPABASE_ANON_KEY=sb_publishable_qKIF-FojyKP7Jg7HI-TlPQ_Q5oiY3gD
+```
+
+Then the app shows a sign-in screen: create an account with your email and a password, and everything works as before — but private to you. (In your Supabase dashboard under **Authentication → Sign In / Up**, turn off "Confirm email" if you want sign-ups to work instantly without a confirmation email.)
+
 **What still needs a developer:** publishing the desktop app installers (needs an Apple developer account) and the iPhone App Store version (needs a Mac with Xcode). Everything else above you can do yourself.
 
 ---
@@ -130,6 +139,21 @@ npm run dev     # cloud backend on :8787 + Vite on :5173
 Open **`http://localhost:5173/?surface=desktop`** on your laptop and **`http://<lan-ip>:5173/?surface=phone`** on your phone (or a second machine/browser). Both attach to the same vault via a shared vault key (`VAULT_KEY`, default `vault-dev-key`; pass `?key=...` on the URL for non-default keys).
 
 Production-ish: `npm run build && npm start` serves the built client and the API from one process on `:8787`.
+
+## User accounts (Supabase Auth)
+
+By default the server runs in shared-key mode (`VAULT_KEY`) — one vault, the self-host setup. Set `VAULT_AUTH=accounts` and it becomes multi-tenant: clients sign in with email+password via Supabase Auth, present their access token on the WS/API, and the server verifies it and serves **each user their own isolated vault** (own presence registry, approvals, modes, kill switch — broadcasts never cross vaults).
+
+```bash
+export VAULT_AUTH=accounts
+export SUPABASE_URL=https://<ref>.supabase.co
+export SUPABASE_ANON_KEY=sb_publishable_...   # public; served to clients via /api/config
+export SUPABASE_SERVICE_KEY=...               # vault storage in Postgres (recommended)
+export SUPABASE_JWT_SECRET=...                # optional: verify tokens locally, no auth round-trips
+                                              # (dashboard → Project Settings → JWT Keys → legacy secret)
+```
+
+Token verification is local (HS256) when `SUPABASE_JWT_SECRET` is set, otherwise against GoTrue with a short cache. Vault rows are looked up by `owner_id`; the node harness authenticates with `--token <access token>` instead of `--key`. `npm run test:auth` covers the whole thing offline (token verification, rejection, per-user isolation, scoped presence) — 11 checks, no Supabase account needed.
 
 ## Deploy
 

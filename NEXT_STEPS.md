@@ -13,7 +13,10 @@ between this and something strangers can download and trust.
       transcript in the vault), outline truncation marker, prompt caching on the Anthropic system block
 
 ## 2. Trust boundary (all the `// TODO: trust boundary` markers)
-- [ ] Replace the shared vault key with real auth (magic link or passkey; one vault per account)
+- [x] Real auth: `VAULT_AUTH=accounts` — Supabase Auth (email+password) sign-in, server-side JWT
+      verification (local HS256 via `SUPABASE_JWT_SECRET`, or GoTrue), one isolated vault per user,
+      per-vault presence/approvals/modes/kill-switch; covered offline by `npm run test:auth` (11 checks).
+      Magic-link/passkey UIs and password reset still open
 - [ ] Device registration + attestation: server-issued device tokens (capabilities are now assigned
       server-side from device type, but the *type* is still client-declared — pairing/approval of new
       devices is the remaining piece)
@@ -34,8 +37,9 @@ between this and something strangers can download and trust.
       (write-through mirror, hydrate on boot; enable with `SUPABASE_URL` + `SUPABASE_SERVICE_KEY`;
       schema live on the project + in `supabase/migrations/`; verify with `npm run smoke:supabase`
       from a network that can reach *.supabase.co — the dev sandbox can't)
-- [x] Multi-vault data model (`vaults` + `vault_id` on every record, keyed by hashed vault key);
-      multi-*user* accounts still open
+- [x] Multi-vault data model (`vaults` + `vault_id` on every record, keyed by hashed vault key
+      or `owner_id`); multi-user accounts live via `VAULT_AUTH=accounts` (server is fully
+      multi-tenant: per-vault contexts, no cross-vault broadcasts)
 - [ ] Supabase Realtime/Presence/Auth to replace the WS server for serverless deploys
       (single-writer server + WS remains the architecture until then)
 - [ ] Blob/attachment storage for non-Markdown files (images in notes)

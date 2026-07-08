@@ -1,7 +1,14 @@
 // Vault cloud backend: canonical vault records, realtime sync, the device
-// presence registry, and the harness. This is the "cloud" seam — the
-// VaultStore + WS protocol here could be swapped for Supabase (Postgres +
-// Realtime + Presence) without touching the client's SyncProvider interface.
+// presence registry, and the harness. Multi-tenant: every vault gets its own
+// context (store + presence + approvals + mode + kill switch), and broadcasts
+// never cross vaults.
+//
+// Auth modes:
+//   VAULT_AUTH=key (default)  — one shared-key vault, the self-host/dev setup
+//   VAULT_AUTH=accounts       — real user accounts via Supabase Auth: clients
+//     sign in (email+password), present their access token, and the server
+//     verifies it (locally with SUPABASE_JWT_SECRET when provided, otherwise
+//     against GoTrue) and gives each user their own isolated vault.
 
 import http from 'node:http';
 import path from 'node:path';
@@ -15,37 +22,167 @@ import { listProviders } from './engines/index.mjs';
 import { migrateVault, seedVault } from './seed.mjs';
 import { connectorStatus } from './connectors.mjs';
 import { buildZip } from './zip.mjs';
+import { verifySupabaseToken } from './auth.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 8787);
 
-// Lightweight auth: a shared vault key attaches real devices to the same
-// vault (single-user prototype).
-// TODO: trust boundary — replace with real auth + device attestation, scoped
-// per-device permissions, and a kill switch before this touches the internet.
 const VAULT_KEY = process.env.VAULT_KEY || 'vault-dev-key';
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || '';
+const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET || '';
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || '';
 
-// Storage backend: Supabase Postgres when configured (state survives
-// redeploys), otherwise the local JSON file. Same interface either way.
-let store;
-if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY) {
-  const { SupabaseVaultStore } = await import('./store-supabase.mjs');
-  store = await new SupabaseVaultStore({
-    url: process.env.SUPABASE_URL,
-    serviceKey: process.env.SUPABASE_SERVICE_KEY,
-    vaultKey: VAULT_KEY,
-  }).init();
-  console.log('vault store: supabase postgres');
-} else {
-  store = new VaultStore(process.env.VAULT_DATA || path.join(__dirname, 'data', 'vault.json'));
+const AUTH_MODE = process.env.VAULT_AUTH === 'accounts' ? 'accounts' : 'key';
+if (AUTH_MODE === 'accounts' && !SUPABASE_JWT_SECRET && !SUPABASE_URL) {
+  throw new Error('VAULT_AUTH=accounts needs SUPABASE_JWT_SECRET (offline verify) or SUPABASE_URL (+ anon key) to verify tokens.');
 }
-seedVault(store);
-migrateVault(store);
-const presence = new PresenceRegistry();
+
+const MODES = ['ask', 'auto', 'readonly'];
+const SETTINGS_PATH = '.vault/settings.json';
+
+/* ── per-vault contexts ─────────────────────────────────────────────────── */
+
+const contexts = new Map(); // vaultId -> Promise<ctx>
+let connSeq = 0;
+let execSeq = 0;
+let approvalSeq = 0;
+
+async function createStore(vaultId, ownerId) {
+  if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+    const { SupabaseVaultStore } = await import('./store-supabase.mjs');
+    return new SupabaseVaultStore({
+      url: SUPABASE_URL,
+      serviceKey: SUPABASE_SERVICE_KEY,
+      vaultKey: VAULT_KEY,
+      ownerId,
+    }).init();
+  }
+  const file =
+    vaultId === 'default'
+      ? process.env.VAULT_DATA || path.join(__dirname, 'data', 'vault.json')
+      : path.join(__dirname, 'data', `vault-${vaultId.replace(/[^\w-]/g, '_')}.json`);
+  return new VaultStore(file);
+}
+
+function readSettings(store) {
+  try {
+    return JSON.parse(store.get(SETTINGS_PATH)?.content ?? '{}') || {};
+  } catch {
+    return {};
+  }
+}
+
+function getContext(vaultId, ownerId = null) {
+  if (!contexts.has(vaultId)) {
+    contexts.set(
+      vaultId,
+      (async () => {
+        const store = await createStore(vaultId, ownerId);
+        seedVault(store);
+        migrateVault(store);
+        const settingsMode = readSettings(store).mode;
+        const ctx = {
+          id: vaultId,
+          store,
+          presence: new PresenceRegistry(),
+          sockets: new Set(),
+          conns: new Map(), // connId -> { ws, descriptor }
+          chatLocks: new Set(),
+          pendingApprovals: new Map(), // approvalId -> { resolve, timer }
+          pendingExec: new Map(), // execId -> { resolve, reject, timer }
+          paused: false, // kill switch: any authed surface can pause the assistant
+          mode: MODES.includes(settingsMode) ? settingsMode : 'ask',
+          broadcast(message) {
+            const payload = JSON.stringify(message);
+            for (const s of ctx.sockets) if (s.readyState === s.OPEN) s.send(payload);
+          },
+        };
+        store.on('change', (records) => ctx.broadcast({ type: 'change', records }));
+        ctx.presence.on('update', (devices) => ctx.broadcast({ type: 'presence', devices }));
+        return ctx;
+      })()
+    );
+  }
+  return contexts.get(vaultId);
+}
+
+// Resolve the vault context a request/connection is entitled to.
+// key mode: the shared vault key -> the single 'default' vault.
+// accounts mode: a Supabase Auth access token -> that user's own vault.
+async function authenticate(params) {
+  if (AUTH_MODE === 'accounts') {
+    const user = await verifySupabaseToken(params.get('token'), {
+      jwtSecret: SUPABASE_JWT_SECRET,
+      supabaseUrl: SUPABASE_URL,
+      apiKey: SUPABASE_ANON_KEY || SUPABASE_SERVICE_KEY,
+    });
+    return getContext(`user-${user.userId}`, user.userId);
+  }
+  if (params.get('key') !== VAULT_KEY) throw new Error('bad vault key');
+  return getContext('default');
+}
+
+/* ── permission modes / approvals / remote exec (all per-context) ───────── */
+
+function setAssistantMode(ctx, mode) {
+  if (!MODES.includes(mode)) return;
+  ctx.mode = mode;
+  ctx.store.put({ path: SETTINGS_PATH, type: 'file', content: JSON.stringify({ ...readSettings(ctx.store), mode }) });
+  ctx.broadcast({ type: 'mode', mode });
+}
+
+// Per-command approval — voice-initiated, screen-confirmed. Before a
+// run_command (or an 'ask'-policy connector tool) executes, every active
+// surface on this vault gets an approval card; the action runs only after a
+// human approves. Deny or 60s of silence rejects it (the model is told).
+function requestApproval(ctx, { chatPath, command, cwd, kind = 'command' }) {
+  return new Promise((resolve) => {
+    const id = `appr-${++approvalSeq}`;
+    const timer = setTimeout(() => {
+      ctx.pendingApprovals.delete(id);
+      ctx.broadcast({ type: 'approval_resolved', id, approved: false });
+      resolve(false);
+    }, 60_000);
+    ctx.pendingApprovals.set(id, { resolve, timer });
+    ctx.broadcast({ type: 'approval_request', id, chatPath, command, cwd: cwd ?? null, kind });
+  });
+}
+
+function resolveApproval(ctx, id, approved) {
+  const pending = ctx.pendingApprovals.get(id);
+  if (!pending) return;
+  ctx.pendingApprovals.delete(id);
+  clearTimeout(pending.timer);
+  ctx.broadcast({ type: 'approval_resolved', id, approved: Boolean(approved) });
+  pending.resolve(Boolean(approved));
+}
+
+// Remote tool execution: dispatch a tool call to a connected device that can
+// run it (the companion node harness), await its reply over the same socket.
+function execRemote(ctx, name, input) {
+  const target = [...ctx.conns.entries()].find(([connId, c]) => {
+    const live = ctx.presence.devices.get(connId);
+    return live?.state === 'active' && (c.descriptor.capabilities || []).includes('exec') && c.ws.readyState === c.ws.OPEN;
+  });
+  if (!target) return Promise.reject(new Error('No machine is connected to run commands right now.'));
+  const [, conn] = target;
+  return new Promise((resolve, reject) => {
+    const id = `exec-${++execSeq}`;
+    const timer = setTimeout(() => {
+      ctx.pendingExec.delete(id);
+      reject(new Error('Command timed out (no response from the machine).'));
+    }, 90_000);
+    ctx.pendingExec.set(id, { resolve, reject, timer });
+    conn.ws.send(JSON.stringify({ type: 'tool_exec', id, name, input }));
+  });
+}
+
+/* ── HTTP API ───────────────────────────────────────────────────────────── */
 
 const app = express();
-// Native shells (the iOS app) call the API cross-origin. The vault key is the
-// gate; CORS just lets the request through. Lock it down for a deployment by
+// Native shells (the iOS app) call the API cross-origin. Auth is the gate;
+// CORS just lets the request through. Lock it down for a deployment by
 // listing origins: VAULT_ALLOWED_ORIGINS=https://vault.example,capacitor://localhost
 const ALLOWED_ORIGINS = (process.env.VAULT_ALLOWED_ORIGINS || '*').split(',').map((s) => s.trim());
 app.use('/api', (req, res, next) => {
@@ -56,20 +193,50 @@ app.use('/api', (req, res, next) => {
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
+
+function httpContext(req) {
+  const params = new URLSearchParams();
+  if (req.query.key) params.set('key', String(req.query.key));
+  if (req.query.token) params.set('token', String(req.query.token));
+  return authenticate(params);
+}
+
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
+// Public bootstrap config: tells the client how to sign in.
+app.get('/api/config', (_req, res) =>
+  res.json({
+    auth: AUTH_MODE,
+    supabaseUrl: AUTH_MODE === 'accounts' ? SUPABASE_URL || null : null,
+    supabaseAnonKey: AUTH_MODE === 'accounts' ? SUPABASE_ANON_KEY || null : null,
+  })
+);
 app.get('/api/models', async (req, res) => {
-  if (req.query.key !== VAULT_KEY) return res.status(401).json({ error: 'bad vault key' });
+  try {
+    await httpContext(req);
+  } catch {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
   res.json({ providers: await listProviders() });
 });
 app.get('/api/connectors', async (req, res) => {
-  if (req.query.key !== VAULT_KEY) return res.status(401).json({ error: 'bad vault key' });
-  res.json({ connectors: await connectorStatus(store) });
+  let ctx;
+  try {
+    ctx = await httpContext(req);
+  } catch {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  res.json({ connectors: await connectorStatus(ctx.store) });
 });
 // Export: the whole vault as a zip of plain Markdown — the "your data is just
 // files" guarantee, downloadable. Chats and .vault system files included.
-app.get('/api/export', (req, res) => {
-  if (req.query.key !== VAULT_KEY) return res.status(401).json({ error: 'bad vault key' });
-  const files = store
+app.get('/api/export', async (req, res) => {
+  let ctx;
+  try {
+    ctx = await httpContext(req);
+  } catch {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  const files = ctx.store
     .list()
     .filter((r) => r.type === 'file')
     .map((r) => ({ path: r.path, content: r.content, mtime: r.mtime }));
@@ -84,6 +251,8 @@ app.use(express.static(dist));
 app.get(/^\/(?!api|ws).*/, (_req, res, next) => {
   res.sendFile(path.join(dist, 'index.html'), (err) => err && next());
 });
+
+/* ── WebSocket sync + turns ─────────────────────────────────────────────── */
 
 const server = http.createServer(app);
 // maxPayload caps a single WS frame (a put with a very large note still fits;
@@ -117,106 +286,16 @@ function makeRateLimiter() {
 const MAX_TURN_TEXT = 32_000;
 const MAX_CONTENT = 1_500_000;
 
-const sockets = new Set();
-function broadcast(message) {
-  const payload = JSON.stringify(message);
-  for (const ws of sockets) {
-    if (ws.readyState === ws.OPEN) ws.send(payload);
-  }
-}
-
-store.on('change', (records) => broadcast({ type: 'change', records }));
-presence.on('update', (devices) => broadcast({ type: 'presence', devices }));
-
-const chatLocks = new Set();
-let connSeq = 0;
-
-// Remote tool execution: dispatch a tool call to a connected device that can
-// run it (the companion node harness), await its reply over the same socket.
-const conns = new Map(); // connId -> { ws, descriptor }
-const pendingExec = new Map(); // execId -> { resolve, reject, timer }
-let execSeq = 0;
-
-// Kill switch: any authed surface can pause the assistant entirely.
-let assistantPaused = false;
-
-// Permission modes, Claude-style. 'ask' confirms every command on-screen
-// before it runs, 'auto' runs commands unattended, 'readonly' refuses them
-// outright. The default is a vault setting (.vault/settings.json) so every
-// device — and every future session — agrees on it.
-const SETTINGS_PATH = '.vault/settings.json';
-const MODES = ['ask', 'auto', 'readonly'];
-
-function readSettings() {
-  try {
-    return JSON.parse(store.get(SETTINGS_PATH)?.content ?? '{}') || {};
-  } catch {
-    return {};
-  }
-}
-
-let assistantMode = MODES.includes(readSettings().mode) ? readSettings().mode : 'ask';
-
-function setAssistantMode(mode) {
-  if (!MODES.includes(mode)) return;
-  assistantMode = mode;
-  store.put({ path: SETTINGS_PATH, type: 'file', content: JSON.stringify({ ...readSettings(), mode }) });
-  broadcast({ type: 'mode', mode });
-}
-
-// Per-command approval — voice-initiated, screen-confirmed. Before a
-// run_command executes, every active surface gets an approval card; the
-// command runs only after a human approves it. Deny or 60s of silence
-// rejects the tool call (the model is told, and adapts).
-const pendingApprovals = new Map(); // approvalId -> { resolve, timer }
-let approvalSeq = 0;
-
-function requestApproval({ chatPath, command, cwd, kind = 'command' }) {
-  return new Promise((resolve) => {
-    const id = `appr-${++approvalSeq}`;
-    const timer = setTimeout(() => {
-      pendingApprovals.delete(id);
-      broadcast({ type: 'approval_resolved', id, approved: false });
-      resolve(false);
-    }, 60_000);
-    pendingApprovals.set(id, { resolve, timer });
-    broadcast({ type: 'approval_request', id, chatPath, command, cwd: cwd ?? null, kind });
-  });
-}
-
-function resolveApproval(id, approved) {
-  const pending = pendingApprovals.get(id);
-  if (!pending) return;
-  pendingApprovals.delete(id);
-  clearTimeout(pending.timer);
-  broadcast({ type: 'approval_resolved', id, approved: Boolean(approved) });
-  pending.resolve(Boolean(approved));
-}
-
-function execRemote(name, input) {
-  const target = [...conns.entries()].find(([connId, c]) => {
-    const live = presence.devices.get(connId);
-    return live?.state === 'active' && (c.descriptor.capabilities || []).includes('exec') && c.ws.readyState === c.ws.OPEN;
-  });
-  if (!target) return Promise.reject(new Error('No machine is connected to run commands right now.'));
-  const [, conn] = target;
-  return new Promise((resolve, reject) => {
-    const id = `exec-${++execSeq}`;
-    const timer = setTimeout(() => {
-      pendingExec.delete(id);
-      reject(new Error('Command timed out (no response from the machine).'));
-    }, 90_000);
-    pendingExec.set(id, { resolve, reject, timer });
-    conn.ws.send(JSON.stringify({ type: 'tool_exec', id, name, input }));
-  });
-}
-
-wss.on('connection', (ws, req) => {
+wss.on('connection', async (ws, req) => {
   const params = new URL(req.url, 'http://x').searchParams;
-  if (params.get('key') !== VAULT_KEY) {
-    ws.close(4001, 'bad vault key');
+  let ctx;
+  try {
+    ctx = await authenticate(params);
+  } catch {
+    ws.close(4001, 'unauthorized');
     return;
   }
+
   const connId = `conn-${++connSeq}`;
   // Capabilities are assigned server-side from the device type — a client
   // cannot self-declare what it is allowed to do.
@@ -234,11 +313,11 @@ wss.on('connection', (ws, req) => {
     capabilities: CAPS_BY_TYPE[deviceType] ?? ['read'],
   };
 
-  sockets.add(ws);
-  conns.set(connId, { ws, descriptor });
-  presence.join(connId, descriptor);
+  ctx.sockets.add(ws);
+  ctx.conns.set(connId, { ws, descriptor });
+  ctx.presence.join(connId, descriptor);
   const takeToken = makeRateLimiter();
-  ws.send(JSON.stringify({ type: 'hello', presence: presence.snapshot(), rev: store.rev, paused: assistantPaused, mode: assistantMode }));
+  ws.send(JSON.stringify({ type: 'hello', presence: ctx.presence.snapshot(), rev: ctx.store.rev, paused: ctx.paused, mode: ctx.mode }));
 
   ws.on('message', async (raw) => {
     const token = takeToken();
@@ -252,6 +331,7 @@ wss.on('connection', (ws, req) => {
     } catch {
       return;
     }
+    const { store, presence } = ctx;
     try {
       switch (msg.type) {
         case 'sync':
@@ -294,19 +374,19 @@ wss.on('connection', (ws, req) => {
           presence.setState(connId, msg.state === 'background' ? 'background' : 'active');
           break;
         case 'approval_response':
-          resolveApproval(String(msg.id), Boolean(msg.approved));
+          resolveApproval(ctx, String(msg.id), Boolean(msg.approved));
           break;
         case 'set_paused':
-          assistantPaused = Boolean(msg.paused);
-          broadcast({ type: 'paused', paused: assistantPaused });
+          ctx.paused = Boolean(msg.paused);
+          ctx.broadcast({ type: 'paused', paused: ctx.paused });
           break;
         case 'set_mode':
-          setAssistantMode(String(msg.mode));
+          setAssistantMode(ctx, String(msg.mode));
           break;
         case 'tool_exec_result': {
-          const pending = pendingExec.get(msg.id);
+          const pending = ctx.pendingExec.get(msg.id);
           if (pending) {
-            pendingExec.delete(msg.id);
+            ctx.pendingExec.delete(msg.id);
             clearTimeout(pending.timer);
             if (msg.ok) pending.resolve(String(msg.output ?? ''));
             else pending.reject(new Error(String(msg.output || 'command failed')));
@@ -314,15 +394,15 @@ wss.on('connection', (ws, req) => {
           break;
         }
         case 'turn': {
-          if (assistantPaused) {
+          if (ctx.paused) {
             ws.send(JSON.stringify({ type: 'turn_error', chatPath: msg.chatPath, error: 'The assistant is paused. Resume it from the Devices panel.' }));
             break;
           }
-          if (chatLocks.has(msg.chatPath)) {
+          if (ctx.chatLocks.has(msg.chatPath)) {
             ws.send(JSON.stringify({ type: 'turn_error', chatPath: msg.chatPath, error: 'A turn is already running in this chat.' }));
             break;
           }
-          chatLocks.add(msg.chatPath);
+          ctx.chatLocks.add(msg.chatPath);
           try {
             await runTurn({
               store,
@@ -332,26 +412,26 @@ wss.on('connection', (ws, req) => {
               deviceType: descriptor.deviceType,
               provider: msg.provider || 'anthropic',
               model: msg.model || 'claude-opus-4-8',
-              broadcast,
+              broadcast: ctx.broadcast,
               execRemote: async (name, input) => {
-                if (assistantMode === 'readonly') {
+                if (ctx.mode === 'readonly') {
                   throw new Error('Commands are off in Read-only mode. The user can change the mode in Settings.');
                 }
-                if (assistantMode !== 'auto') {
-                  const approved = await requestApproval({
+                if (ctx.mode !== 'auto') {
+                  const approved = await requestApproval(ctx, {
                     chatPath: msg.chatPath,
                     command: String(input?.command ?? ''),
                     cwd: input?.cwd,
                   });
                   if (!approved) throw new Error('The user declined to run that command.');
                 }
-                return execRemote(name, input);
+                return execRemote(ctx, name, input);
               },
               // Per-connector 'ask' policy routes through the same approval
               // cards; the vault-wide Auto mode trusts everything.
               approveConnector: async ({ connectorName, toolName }) => {
-                if (assistantMode === 'auto') return true;
-                return requestApproval({
+                if (ctx.mode === 'auto') return true;
+                return requestApproval(ctx, {
                   chatPath: msg.chatPath,
                   kind: 'connector',
                   command: `${connectorName}: ${toolName}`,
@@ -359,7 +439,7 @@ wss.on('connection', (ws, req) => {
               },
             });
           } finally {
-            chatLocks.delete(msg.chatPath);
+            ctx.chatLocks.delete(msg.chatPath);
           }
           break;
         }
@@ -370,12 +450,16 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('close', () => {
-    sockets.delete(ws);
-    conns.delete(connId);
-    presence.leave(connId);
+    ctx.sockets.delete(ws);
+    ctx.conns.delete(connId);
+    ctx.presence.leave(connId);
   });
 });
 
+// In key mode, warm the single vault at boot (same behavior as before);
+// account vaults spin up lazily on first sign-in.
+if (AUTH_MODE === 'key') await getContext('default');
+
 server.listen(PORT, () => {
-  console.log(`vault server on :${PORT} (vault key: ${VAULT_KEY})`);
+  console.log(`vault server on :${PORT} (auth: ${AUTH_MODE}${AUTH_MODE === 'key' ? `, vault key: ${VAULT_KEY}` : ''})`);
 });

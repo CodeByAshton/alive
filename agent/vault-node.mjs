@@ -10,6 +10,8 @@
 // Options (env fallbacks in parens):
 //   --server     ws(s)://host:port of the vault server   (VAULT_SERVER)
 //   --key        shared vault key                        (VAULT_KEY)
+//   --token      Supabase access token — required instead (VAULT_TOKEN)
+//                of --key when the server runs accounts mode
 //   --workspace  directory commands run in               (VAULT_WORKSPACE, default cwd)
 //   --name       device name shown in presence           (VAULT_NODE_NAME, default host)
 //   --allow      comma list of allowed first words,      (VAULT_ALLOW)
@@ -36,6 +38,7 @@ function arg(flag, envKey, fallback) {
 
 const SERVER = arg('--server', 'VAULT_SERVER', 'ws://localhost:8787');
 const KEY = arg('--key', 'VAULT_KEY', 'vault-dev-key');
+const TOKEN = arg('--token', 'VAULT_TOKEN', '');
 const WORKSPACE = path.resolve(arg('--workspace', 'VAULT_WORKSPACE', process.cwd()));
 const NAME = arg('--name', 'VAULT_NODE_NAME', os.hostname().split('.')[0]);
 const ALLOW = (arg('--allow', 'VAULT_ALLOW', '') || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -122,7 +125,7 @@ function runCommand(input) {
 function connect() {
   // Capabilities are assigned by the server from the device type.
   const params = new URLSearchParams({
-    key: KEY,
+    ...(TOKEN ? { token: TOKEN } : { key: KEY }),
     deviceId: `node-${NAME}`,
     deviceType: 'node',
   });

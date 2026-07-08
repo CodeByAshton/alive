@@ -6,8 +6,9 @@
 // state survives redeploys and moves between machines.
 //
 // Enable by setting SUPABASE_URL + SUPABASE_SERVICE_KEY on the server.
-// The vault row is found by sha256(vault key) — the key itself never leaves
-// the server.
+// A vault row is found either by sha256(vault key) — shared-key deployments,
+// the key itself never leaves the server — or by owner_id (a Supabase Auth
+// user) in accounts mode.
 
 import crypto from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
@@ -17,12 +18,13 @@ const PAGE = 1000; // PostgREST's default max rows per request
 const UPSERT_CHUNK = 200;
 
 export class SupabaseVaultStore extends VaultStore {
-  constructor({ url, serviceKey, vaultKey, name = 'Vault' }) {
+  constructor({ url, serviceKey, vaultKey, ownerId, name = 'Vault' }) {
     super(null); // no data file; _load() falls through to a fresh vault
     this.client = createClient(url, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
-    this.keyHash = crypto.createHash('sha256').update(vaultKey).digest('hex');
+    this.ownerId = ownerId || null;
+    this.keyHash = ownerId ? null : crypto.createHash('sha256').update(vaultKey).digest('hex');
     this.vaultName = name;
     this.vaultId = null;
     this._dirty = new Map(); // path -> latest changed record awaiting write-through
@@ -32,10 +34,12 @@ export class SupabaseVaultStore extends VaultStore {
   }
 
   async init() {
+    const identity = this.ownerId ? { owner_id: this.ownerId } : { key_hash: this.keyHash };
+    const [[column, value]] = Object.entries(identity);
     const { data: found, error } = await this.client
       .from('vaults')
       .select('id, rev')
-      .eq('key_hash', this.keyHash)
+      .eq(column, value)
       .maybeSingle();
     if (error) throw new Error(`Supabase (vault lookup): ${error.message}`);
 
@@ -43,7 +47,7 @@ export class SupabaseVaultStore extends VaultStore {
     if (!vault) {
       const { data, error: insErr } = await this.client
         .from('vaults')
-        .insert({ key_hash: this.keyHash, name: this.vaultName })
+        .insert({ ...identity, name: this.vaultName })
         .select('id, rev')
         .single();
       if (insErr) throw new Error(`Supabase (vault create): ${insErr.message}`);

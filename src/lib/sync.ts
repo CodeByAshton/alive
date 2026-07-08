@@ -9,8 +9,9 @@
 import { db, getLastRev, loadCachedRecords, setLastRev } from './db';
 import { useVault } from './store';
 import type { AssistantMode, VaultRecord } from './types';
-import { getDeviceId, getSurface, getVaultKey } from './device';
+import { getDeviceId, getSurface } from './device';
 import { getServerConfig } from './config';
+import { authQuery } from './auth';
 
 let ws: WebSocket | null = null;
 let started = false;
@@ -18,7 +19,6 @@ let backoff = 500;
 
 export const surface = getSurface();
 const deviceId = getDeviceId(surface);
-const vaultKey = getVaultKey();
 const server = getServerConfig();
 
 export async function startSync(): Promise<void> {
@@ -30,7 +30,8 @@ export async function startSync(): Promise<void> {
   useVault.getState().setHydrated();
   refreshPendingCount();
 
-  fetch(`${server.httpBase}/api/models?key=${encodeURIComponent(vaultKey)}`)
+  authQuery()
+    .then((q) => fetch(`${server.httpBase}/api/models?${q}`))
     .then((r) => r.json())
     .then((json) => useVault.getState().setProviders(json.providers ?? []))
     .catch(() => {});
@@ -42,15 +43,13 @@ export async function startSync(): Promise<void> {
   });
 }
 
-function connect() {
+async function connect() {
   if (!server) return;
-  // Capabilities are assigned server-side from the device type.
-  const params = new URLSearchParams({
-    key: vaultKey,
-    deviceId,
-    deviceType: surface,
-  });
-  ws = new WebSocket(`${server.wsBase}/ws?${params}`);
+  // Capabilities are assigned server-side from the device type. The auth
+  // credential is re-read on every (re)connect so refreshed account tokens
+  // are picked up automatically.
+  const params = new URLSearchParams({ deviceId, deviceType: surface });
+  ws = new WebSocket(`${server.wsBase}/ws?${params}&${await authQuery()}`);
 
   ws.onopen = async () => {
     backoff = 500;
