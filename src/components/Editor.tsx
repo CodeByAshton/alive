@@ -17,6 +17,7 @@ import { useVault } from '../lib/store';
 import { putRecord } from '../lib/sync';
 import { Markdown } from './Markdown';
 import { Properties } from './Properties';
+import { SaveIndicator, useSaveFeedback } from './SaveIndicator';
 
 export function Editor() {
   const activePath = useVault((s) => s.activePath);
@@ -28,14 +29,19 @@ export function Editor() {
   const viewRef = useRef<EditorView | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const lastLocalEdit = useRef<{ path: string; content: string } | null>(null);
+  const feedback = useSaveFeedback();
 
   useEffect(() => {
     if (!hostRef.current || mode !== 'edit' || !activePath) return;
 
     const save = (content: string) => {
       lastLocalEdit.current = { path: activePath, content };
+      feedback.saving();
       clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(() => putRecord(activePath, 'file', content), 400);
+      saveTimer.current = setTimeout(async () => {
+        await putRecord(activePath, 'file', content);
+        feedback.saved();
+      }, 400);
     };
 
     const view = new EditorView({
@@ -100,6 +106,7 @@ export function Editor() {
             </span>
           ))}
         </nav>
+        <SaveIndicator state={feedback.state} />
         <Tabs value={mode} onValueChange={(v) => setMode(v as 'read' | 'edit')}>
           <TabsList className="editor-modes">
             <TabsTrigger value="read">Read</TabsTrigger>

@@ -100,6 +100,40 @@ async function connect() {
       case 'automation_edited':
         resolveAutomationEdit(msg);
         break;
+      case 'automation_ran': {
+        for (const fn of automationRanListeners) fn(String(msg.path ?? ''));
+        // Run-now gets a direct verdict; scheduled runs already speak through
+        // their own notify() and shouldn't toast twice.
+        if (msg.manual) {
+          const id = `notice-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+          state.addNotice({
+            id,
+            title: String(msg.name ?? 'Automation'),
+            message: msg.ok ? 'Ran without errors.' : `Run failed: ${String(msg.error ?? 'unknown error')}`,
+          });
+          setTimeout(() => useVault.getState().removeNotice(id), 8000);
+        }
+        break;
+      }
+      case 'reflect_done': {
+        for (const fn of reflectDoneListeners) fn();
+        // Proposals raise their own persisted notification server-side; cover
+        // the other outcomes so Reflect now always answers.
+        const proposals = Array.isArray(msg.proposals) ? msg.proposals.length : 0;
+        if (!proposals) {
+          const observations = Number(msg.observations ?? 0);
+          const id = `notice-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+          state.addNotice({
+            id,
+            title: 'Reflection',
+            message: observations
+              ? `Learned ${observations} new thing${observations === 1 ? '' : 's'} about you.`
+              : 'Nothing new to learn from yet — keep chatting.',
+          });
+          setTimeout(() => useVault.getState().removeNotice(id), 8000);
+        }
+        break;
+      }
       case 'approval_resolved':
         state.removeApproval(msg.id);
         break;
@@ -258,6 +292,20 @@ function resolveAutomationEdit(msg: { requestId?: string; ok?: boolean; path?: s
 
 export function runAutomationNow(path: string): void {
   send({ type: 'automation_run', path });
+}
+
+// Run-now / reflect feedback hooks — views subscribe to show progress state.
+type PathListener = (path: string) => void;
+const automationRanListeners = new Set<PathListener>();
+export function onAutomationRan(fn: PathListener): () => void {
+  automationRanListeners.add(fn);
+  return () => automationRanListeners.delete(fn);
+}
+
+const reflectDoneListeners = new Set<() => void>();
+export function onReflectDone(fn: () => void): () => void {
+  reflectDoneListeners.add(fn);
+  return () => reflectDoneListeners.delete(fn);
 }
 
 export function dismissAutomationProposal(name: string): void {

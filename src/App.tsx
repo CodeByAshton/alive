@@ -76,12 +76,15 @@ function Desktop() {
       <Sidebar />
       <main className="flex min-w-0 flex-1 p-2 pl-0">
         <section className="main-card flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border bg-background shadow-xs">
-          {mainView === 'chat' && <Chat />}
-          {mainView === 'note' && <Editor />}
-          {mainView === 'graph' && <GraphView />}
-          {mainView === 'skills' && <SkillsView />}
-          {mainView === 'connectors' && <ConnectorsView />}
-          {mainView === 'automations' && <AutomationsView />}
+          {/* Keyed on the view so switching sections animates in. */}
+          <div key={mainView} className="view-fade flex min-h-0 min-w-0 flex-1 flex-col">
+            {mainView === 'chat' && <Chat />}
+            {mainView === 'note' && <Editor />}
+            {mainView === 'graph' && <GraphView />}
+            {mainView === 'skills' && <SkillsView />}
+            {mainView === 'connectors' && <ConnectorsView />}
+            {mainView === 'automations' && <AutomationsView />}
+          </div>
         </section>
       </main>
       <CommandPalette />

@@ -6,7 +6,7 @@
 // The Memory pane shows what the assistant has learned (a plain, editable note).
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Bot, Brain, Clock, Pencil, Play, Plus, Sparkles, Trash2 } from 'lucide-react';
+import { Bot, Brain, Clock, Loader2, Pencil, Play, Plus, Sparkles, Trash2 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -31,8 +31,18 @@ import {
   timeAgoShort,
   type Automation,
 } from '../lib/automations';
-import { deletePath, dismissAutomationProposal, editAutomation, putRecord, requestReflection, runAutomationNow } from '../lib/sync';
+import {
+  deletePath,
+  dismissAutomationProposal,
+  editAutomation,
+  onAutomationRan,
+  onReflectDone,
+  putRecord,
+  requestReflection,
+  runAutomationNow,
+} from '../lib/sync';
 import { ConfirmDialog, type ConfirmPrompt } from './dialogs';
+import { SaveIndicator, useSaveFeedback } from './SaveIndicator';
 
 function defaultEngine(providers: { id: string; available: boolean; models: string[] }[]) {
   const p = providers.find((x) => x.available && x.models.length);
@@ -168,14 +178,42 @@ function AutomationDetail({
   onDelete: () => void;
 }) {
   const [showScript, setShowScript] = useState(false);
+  const [running, setRunning] = useState(false);
+
+  // Run-now feedback: spinner until the server reports the run finished
+  // (the result itself arrives as a toast + the Last ran row updating).
+  useEffect(() => {
+    if (!running) return;
+    const stop = onAutomationRan((path) => {
+      if (path === a.path) setRunning(false);
+    });
+    const timeout = setTimeout(() => setRunning(false), 15_000);
+    return () => {
+      stop();
+      clearTimeout(timeout);
+    };
+  }, [running, a.path]);
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
       <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b px-4">
         <span className="truncate text-[13px] font-medium text-neutral-900">{a.name}</span>
         <span className="flex items-center gap-1">
-          <Button variant="ghost" size="icon-sm" title="Run now" onClick={() => runAutomationNow(a.path)}>
-            <Play className="size-4 text-neutral-400" />
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            title="Run now"
+            disabled={running}
+            onClick={() => {
+              setRunning(true);
+              runAutomationNow(a.path);
+            }}
+          >
+            {running ? (
+              <Loader2 className="size-4 animate-spin text-neutral-500" />
+            ) : (
+              <Play className="size-4 text-neutral-400" />
+            )}
           </Button>
           <Button variant="ghost" size="icon-sm" title="Delete automation" onClick={onDelete}>
             <Trash2 className="size-4 text-neutral-400" />
@@ -360,6 +398,7 @@ function MemoryPane() {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const lastSaved = useRef(record?.content ?? '');
   const [reflecting, setReflecting] = useState(false);
+  const feedback = useSaveFeedback();
 
   useEffect(() => {
     const incoming = record?.content ?? '';
@@ -369,12 +408,26 @@ function MemoryPane() {
     }
   }, [record]);
 
+  // Reflect now resolves when the server answers (a toast reports what it
+  // learned); the timeout is only a safety net.
+  useEffect(() => {
+    if (!reflecting) return;
+    const stop = onReflectDone(() => setReflecting(false));
+    const timeout = setTimeout(() => setReflecting(false), 30_000);
+    return () => {
+      stop();
+      clearTimeout(timeout);
+    };
+  }, [reflecting]);
+
   const update = (value: string) => {
     setDraft(value);
+    feedback.saving();
     clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
+    saveTimer.current = setTimeout(async () => {
       lastSaved.current = value;
-      putRecord(MEMORY_FILE, 'file', value);
+      await putRecord(MEMORY_FILE, 'file', value);
+      feedback.saved();
     }, 600);
   };
 
@@ -382,18 +435,21 @@ function MemoryPane() {
     <div className="flex min-w-0 flex-1 flex-col">
       <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b px-4">
         <span className="text-[13px] font-medium text-neutral-900">Memory</span>
-        <Button
-          size="xs"
-          variant="outline"
-          disabled={reflecting}
-          onClick={() => {
-            setReflecting(true);
-            requestReflection();
-            setTimeout(() => setReflecting(false), 4000);
-          }}
-        >
-          <Brain className="size-3.5" /> {reflecting ? 'Reflecting…' : 'Reflect now'}
-        </Button>
+        <span className="flex items-center gap-2">
+          <SaveIndicator state={feedback.state} />
+          <Button
+            size="xs"
+            variant="outline"
+            disabled={reflecting}
+            onClick={() => {
+              setReflecting(true);
+              requestReflection();
+            }}
+          >
+            {reflecting ? <Loader2 className="size-3.5 animate-spin" /> : <Brain className="size-3.5" />}
+            {reflecting ? 'Reflecting…' : 'Reflect now'}
+          </Button>
+        </span>
       </header>
       <div className="quiet-scroll flex-1 overflow-y-auto">
         <div className="mx-auto flex max-w-2xl flex-col gap-4 px-8 py-8">

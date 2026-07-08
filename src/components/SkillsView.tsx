@@ -12,6 +12,7 @@ import { useVault } from '../lib/store';
 import { listSkills, newSkillPath, saveSkill, type Skill } from '../lib/skills';
 import { deletePath } from '../lib/sync';
 import { ConfirmDialog, type ConfirmPrompt } from './dialogs';
+import { SaveIndicator, useSaveFeedback } from './SaveIndicator';
 
 export function SkillsView() {
   const records = useVault((s) => s.records);
@@ -108,6 +109,7 @@ function SkillEditor({ skill, onDelete }: { skill: Skill; onDelete: () => void }
   const [draft, setDraft] = useState<Skill>(skill);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const lastSaved = useRef<Skill>(skill);
+  const feedback = useSaveFeedback();
 
   // Pick up remote edits unless we have unsaved local changes in flight.
   useEffect(() => {
@@ -120,20 +122,25 @@ function SkillEditor({ skill, onDelete }: { skill: Skill; onDelete: () => void }
       next.trigger = '/' + patch.trigger.replace(/^\/+/, '').toLowerCase().replace(/[^a-z0-9-]+/g, '-');
     }
     setDraft(next);
+    feedback.saving();
     clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
+    saveTimer.current = setTimeout(async () => {
       lastSaved.current = next;
-      saveSkill(next);
+      await saveSkill(next);
+      feedback.saved();
     }, 500);
   };
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
-      <header className="flex h-12 shrink-0 items-center justify-between border-b px-4">
+      <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b px-4">
         <span className="truncate text-[13px] font-medium text-neutral-900">{draft.name}</span>
-        <Button variant="ghost" size="icon-sm" title="Delete skill" onClick={onDelete}>
-          <Trash2 className="size-4 text-neutral-400" />
-        </Button>
+        <span className="flex items-center gap-2">
+          <SaveIndicator state={feedback.state} />
+          <Button variant="ghost" size="icon-sm" title="Delete skill" onClick={onDelete}>
+            <Trash2 className="size-4 text-neutral-400" />
+          </Button>
+        </span>
       </header>
       <div className="quiet-scroll flex-1 overflow-y-auto">
         <div className="mx-auto flex max-w-2xl flex-col gap-5 px-8 py-8">

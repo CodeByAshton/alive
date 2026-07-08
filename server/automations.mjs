@@ -213,7 +213,16 @@ export async function runAutomation(ctx, path, { manual = false } = {}) {
     finished.status = 'done';
   }
   ctx.store.put({ path, type: 'file', content: serializeAutomation(finished) });
-  ctx.broadcast({ type: 'automation_ran', path, ok: result.ok, error: result.error ?? null, logs: result.logs });
+  ctx.broadcast({
+    type: 'automation_ran',
+    path,
+    name: finished.name,
+    ok: result.ok,
+    error: result.error ?? null,
+    logs: result.logs,
+    // Manual runs get direct UI feedback; scheduled runs speak through notify().
+    manual: Boolean(manual),
+  });
   return result;
 }
 
